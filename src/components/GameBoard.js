@@ -27,10 +27,10 @@ export default function GameBoard({ themeKey }) {
   const currentTheme = themes[themeKey] || themes.mickey;
 
   // --- 1. REALTIME LISTENER ---
-  // This listens for moves made by the OTHER player
   useEffect(() => {
     if (gameMode !== "pvp" || !player1 || !player2) return;
 
+    // Listen for board updates from the database
     const channel = supabase
       .channel('realtime-chess')
       .on(
@@ -38,7 +38,7 @@ export default function GameBoard({ themeKey }) {
         { event: 'UPDATE', schema: 'public', table: 'games' },
         (payload) => {
           const newFen = payload.new.fen;
-          // Only update if the FEN is different to avoid infinite loops
+          // Only update local state if the incoming move is new
           if (newFen !== game.fen()) {
             const updatedGame = new Chess(newFen);
             setGame(updatedGame);
@@ -51,7 +51,7 @@ export default function GameBoard({ themeKey }) {
     return () => { supabase.removeChannel(channel); };
   }, [gameMode, player1, player2, game]);
 
-  // --- 2. CLOUD DATA FETCHING ---
+  // --- 2. FETCH LEADERBOARD ---
   const fetchTreasury = async () => {
     const { data } = await supabase.from('treasury').select('*').order('coins', { ascending: false });
     if (data) setTreasury(data);
@@ -59,7 +59,7 @@ export default function GameBoard({ themeKey }) {
 
   useEffect(() => { fetchTreasury(); }, []);
 
-  // --- 3. START GAME (MATCHMAKING) ---
+  // --- 3. START GAME (PVP MATCHMAKING) ---
   const handleStartGame = async (e) => {
     e.preventDefault();
     if (!inputs.p1) return;
@@ -73,7 +73,7 @@ export default function GameBoard({ themeKey }) {
     setPlayer1(u1);
 
     if (gameMode === "pvp" && inputs.p2) {
-      // Find existing game room between these two players
+      // Find game room where p1 and p2 are either white or black
       let { data: existingGame } = await supabase
         .from('games')
         .select('*')
@@ -83,7 +83,7 @@ export default function GameBoard({ themeKey }) {
       if (existingGame) {
         setGame(new Chess(existingGame.fen));
       } else {
-        // Create new room if none exists
+        // Create new game if none found
         await supabase.from('games').insert([
           { white_player: inputs.p1, black_player: inputs.p2, fen: new Chess().fen() }
         ]);
@@ -97,7 +97,7 @@ export default function GameBoard({ themeKey }) {
     fetchTreasury();
   };
 
-  // --- 4. STOCKFISH ENGINE ---
+  // --- 4. ENGINE (STOCKFISH) ---
   useEffect(() => {
     stockfish.current = new Worker("/stockfish.js");
     stockfish.current.onmessage = (e) => {
@@ -128,7 +128,7 @@ export default function GameBoard({ themeKey }) {
     }
   }, [game, difficulty, gameMode, player1]);
 
-  // --- 5. MOVE LOGIC & BROADCASTING ---
+  // --- 5. MOVE & BROADCAST ---
   async function onDrop(sourceSquare, targetSquare) {
     if (!audioUnlocked) setAudioUnlocked(true);
 
@@ -140,7 +140,7 @@ export default function GameBoard({ themeKey }) {
       setGame(gameCopy);
       handleMoveSounds(move, gameCopy);
 
-      // BROADCAST TO SUPABASE IF PVP
+      // BROADCAST TO SUPABASE
       if (gameMode === "pvp") {
         await supabase
           .from('games')
@@ -153,7 +153,7 @@ export default function GameBoard({ themeKey }) {
     } catch (e) { return false; }
   }
 
-  // --- 6. UTILS (SCORES, SOUNDS, UI) ---
+  // --- 6. UTILITIES ---
   const updateCoins = async (username, diff) => {
     const { data } = await supabase.from('treasury').select('coins').eq('username', username).single();
     if (data) {
@@ -167,7 +167,6 @@ export default function GameBoard({ themeKey }) {
     if (gameInstance.isCheckmate()) {
       const winnerColor = gameInstance.turn() === 'w' ? 'b' : 'w';
       msg = winnerColor === 'w' ? "White Wins!" : "Black Wins!";
-      // Add coin logic here if desired
     } else {
       msg = "Draw!";
     }
@@ -207,7 +206,7 @@ export default function GameBoard({ themeKey }) {
     return pieceMap;
   }, [currentTheme, themeKey]);
 
-  // --- RENDER ---
+  // --- UI ---
   if (!player1) {
     return (
       <div style={{ padding: "40px", textAlign: "center", color: "white", backgroundColor: "#111", borderRadius: "20px", border: `4px solid ${currentTheme.light}`, maxWidth: "500px", margin: "100px auto" }}>
