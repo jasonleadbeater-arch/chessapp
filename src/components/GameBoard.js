@@ -12,6 +12,7 @@ export default function GameBoard({ themeKey }) {
   const [aiLevel, setAiLevel] = useState(1);
   const [inputs, setInputs] = useState({ p1: "", p2: "" });
   const [treasury, setTreasury] = useState([]);
+  const [liveGames, setLiveGames] = useState([]);
   const [game, setGame] = useState(new Chess());
   const [optionSquares, setOptionSquares] = useState({});
   const [audioUnlocked, setAudioUnlocked] = useState(false);
@@ -61,10 +62,12 @@ export default function GameBoard({ themeKey }) {
     return true;
   }
 
-  // --- DATABASE & ENGINE ---
+  // --- DATABASE & COINS ---
   const fetchData = async () => {
     const { data: m } = await supabase.from('treasury').select('*').order('coins', { ascending: false });
     if (m) setTreasury(m);
+    const { data: g } = await supabase.from('games').select('*').limit(10);
+    if (g) setLiveGames(g);
   };
   useEffect(() => { fetchData(); }, []);
 
@@ -78,72 +81,46 @@ export default function GameBoard({ themeKey }) {
   const playSound = (f) => { 
     if (!audioUnlocked) return;
     const audio = new Audio(`${currentTheme.audioPath}${f}`);
-    audio.play().catch(e => console.log("Sound error:", e));
+    audio.play().catch(() => {});
   };
 
-  // --- STOCKFISH INITIALIZATION ---
+  // --- REVERTED STOCKFISH ENGINE (Original Working Logic) ---
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      stockfish.current = new Worker('/stockfish.js');
-      
-      stockfish.current.onmessage = (e) => {
-        console.log("Stockfish Says:", e.data); // DEBUG LOG
-        if (e.data.startsWith("bestmove") && gameMode === "ai") {
-          const moveStr = e.data.split(" ")[1];
-          if (!moveStr || moveStr === "(none)") return;
-
-          const next = new Chess(game.fen());
-          try {
-            const m = next.move({ 
-              from: moveStr.substring(0, 2), 
-              to: moveStr.substring(2, 4), 
-              promotion: "q" 
-            });
-            if (m) {
-              setGame(next);
-              playSound(m.captured ? "black_capture.mp3" : "move.mp3");
-              checkGameOver(next);
-            }
-          } catch (err) { console.error("AI Move Logic Error:", err); }
-        }
-      };
-
-      stockfish.current.postMessage("uci");
-      stockfish.current.postMessage(`setoption name Skill Level value ${aiLevel}`);
-      stockfish.current.postMessage("isready");
-    }
+    stockfish.current = new Worker('/stockfish.js');
+    stockfish.current.onmessage = (e) => {
+      if (e.data.startsWith("bestmove") && gameMode === "ai") {
+        const moveStr = e.data.split(" ")[1];
+        const next = new Chess(game.fen());
+        const m = next.move({ from: moveStr.substring(0, 2), to: moveStr.substring(2, 4), promotion: "q" });
+        setGame(next);
+        if (m?.captured) playSound("black_capture.mp3");
+        checkGameOver(next);
+      }
+    };
     return () => stockfish.current?.terminate();
-  }, [gameMode, player1, aiLevel]);
+  }, [gameMode, player1]);
 
-  // --- TRIGGER AI MOVE ---
   useEffect(() => {
     if (gameMode === "ai" && game.turn() === 'b' && !game.isGameOver() && player1) {
-      const timer = setTimeout(() => {
-        // The Reset Sequence
-        stockfish.current?.postMessage("ucinewgame");
-        stockfish.current?.postMessage("isready");
-        stockfish.current?.postMessage(`position fen ${game.fen()}`);
-        
-        // Dynamic Depth
-        const depth = aiLevel < 5 ? 2 : aiLevel < 12 ? 8 : 14;
-        stockfish.current?.postMessage(`go depth ${depth}`);
-      }, 600);
-      return () => clearTimeout(timer);
+      stockfish.current?.postMessage(`position fen ${game.fen()}`);
+      stockfish.current?.postMessage(`go depth 10`);
     }
   }, [game]);
 
   const checkGameOver = async (gameInstance) => {
     if (!gameInstance.isGameOver() || gameOverMessage) return;
-    let msg = gameInstance.isCheckmate() 
-      ? `${gameInstance.turn() === 'w' ? player2?.username : player1?.username} Wins! (+3 🪙)`
-      : "Draw! (+1 🪙)";
-    
-    setGameOverMessage(msg);
+    let msg = "";
     if (gameInstance.isCheckmate()) {
-      const winner = gameInstance.turn() === 'w' ? player2?.username : player1?.username;
-      const loser = gameInstance.turn() === 'w' ? player1?.username : player2?.username;
-      await updateCoins(winner, 3); await updateCoins(loser, -3);
+      const winnerColor = gameInstance.turn() === 'w' ? 'b' : 'w';
+      const winName = winnerColor === 'w' ? player1?.username : player2?.username;
+      const loseName = winnerColor === 'w' ? player2?.username : player1?.username;
+      msg = `${winName} Wins! (+3 🪙)`;
+      await updateCoins(winName, 3); await updateCoins(loseName, -3);
+    } else {
+      msg = "Draw! (+1 🪙)";
+      await updateCoins(player1?.username, 1); await updateCoins(player2?.username, 1);
     }
+    setGameOverMessage(msg);
   };
 
   // --- HANDLERS ---
@@ -162,29 +139,31 @@ export default function GameBoard({ themeKey }) {
 
   const handleStartGame = async (e) => {
     if (e) e.preventDefault();
-    setAudioUnlocked(true); 
+    setAudioUnlocked(true);
     const p1 = inputs.p1.toLowerCase().trim();
     if (!p1) return;
     setIsJoining(true);
-    let { data: u1 } = await supabase.from('treasury').select('*').eq('username', p1).maybeSingle();
-    if (!u1) {
-      const { data: n1 } = await supabase.from('treasury').insert([{ username: p1, coins: 50 }]).select().single();
-      u1 = n1;
-    }
-    setPlayer1(u1);
-    setPlayer2({ username: gameMode === "ai" ? "Stockfish AI" : inputs.p2 || "Player 2" });
-    setIsJoining(false);
+    try {
+      let { data: u1 } = await supabase.from('treasury').select('*').eq('username', p1).maybeSingle();
+      if (!u1) {
+        const { data: n1 } = await supabase.from('treasury').insert([{ username: p1, coins: 50 }]).select().single();
+        u1 = n1;
+      }
+      setPlayer1(u1);
+      setPlayer2({ username: gameMode === "ai" ? "Stockfish AI" : inputs.p2 || "Opponent" });
+    } finally { setIsJoining(false); }
   };
 
+  // --- THEME MUSIC ---
   useEffect(() => {
     if (!audioUnlocked) return;
+    if (bgMusic.current) { bgMusic.current.pause(); bgMusic.current.src = ""; }
     const musicPath = `${currentTheme.audioPath}theme.mp3`;
-    if (bgMusic.current) bgMusic.current.pause();
     bgMusic.current = new Audio(musicPath);
     bgMusic.current.loop = true;
-    bgMusic.current.volume = 0.2;
+    bgMusic.current.volume = 0.3;
     bgMusic.current.play().catch(() => {});
-    return () => bgMusic.current?.pause();
+    return () => { if (bgMusic.current) bgMusic.current.pause(); };
   }, [themeKey, audioUnlocked]);
 
   const customPieces = useMemo(() => {
@@ -200,7 +179,7 @@ export default function GameBoard({ themeKey }) {
 
   const { whiteCaptured, blackCaptured } = getCapturedPieces();
 
-  // --- UI: LOBBY ---
+  // --- UI ---
   if (!player1) {
     return (
       <div onClick={() => setAudioUnlocked(true)} style={{ minHeight: "100vh", backgroundColor: "#000", color: "white", padding: "20px", textAlign: "center" }}>
@@ -214,13 +193,7 @@ export default function GameBoard({ themeKey }) {
              </div>
              <form onSubmit={handleStartGame} style={{ display: "flex", flexDirection: "column", gap: "15px" }}>
                 <input placeholder="Your Name" value={inputs.p1} onChange={(e) => setInputs({...inputs, p1: e.target.value})} style={{ padding: "12px", borderRadius: "5px", color: "#000" }} required />
-                {gameMode === "ai" && (
-                   <div style={{ padding: "10px", background: "#222", borderRadius: "10px" }}>
-                     <label style={{ fontSize: "12px", color: currentTheme.light }}>AI LEVEL: {aiLevel}</label>
-                     <input type="range" min="0" max="20" value={aiLevel} onChange={(e) => setAiLevel(parseInt(e.target.value))} style={{ width: "100%", accentColor: currentTheme.light }} />
-                   </div>
-                )}
-                <button type="submit" style={{ padding: "15px", backgroundColor: currentTheme.light, color: "#000", fontWeight: "bold", borderRadius: "5px" }}>ENTER CLUB</button>
+                <button type="submit" style={{ padding: "15px", backgroundColor: currentTheme.light, color: "#000", fontWeight: "bold" }}>ENTER CLUB</button>
              </form>
           </div>
           <img src="/themes/miraculous/pieces/wq.png" style={{ width: "120px" }} alt="Ladybug" />
@@ -229,29 +202,24 @@ export default function GameBoard({ themeKey }) {
     );
   }
 
-  // --- UI: GAME ---
   return (
     <div style={{ display: "flex", justifyContent: "center", padding: "40px", backgroundColor: "#000", minHeight: "100vh", color: "white" }}>
       <div style={{ width: "80px", background: "#111", padding: "10px", borderRadius: "10px" }}>
         {blackCaptured.map((p, i) => <img key={i} src={`${currentTheme.path}w${p.toLowerCase()}.png`} style={{ width: "30px" }} alt="lost" />)}
       </div>
-
       <div style={{ margin: "0 40px", textAlign: "center" }}>
         <h2 style={{ color: currentTheme.light }}>{player1.username} vs {player2?.username}</h2>
         {gameOverMessage && (
-          <div style={{ position: "absolute", zIndex: 100, top: "30%", left: "50%", transform: "translateX(-50%)", backgroundColor: "#000", padding: "40px", border: `4px solid ${currentTheme.light}`, borderRadius: "15px" }}>
+          <div style={{ position: "absolute", zIndex: 100, top: "30%", left: "50%", transform: "translateX(-50%)", backgroundColor: "#000", padding: "40px", border: `4px solid ${currentTheme.light}` }}>
             <h1>{gameOverMessage}</h1>
-            <button onClick={() => { setGame(new Chess()); setGameOverMessage(null); }} style={{ padding: "10px 20px", backgroundColor: currentTheme.light, fontWeight: "bold" }}>NEW GAME</button>
+            <button onClick={() => { setGame(new Chess()); setGameOverMessage(null); }} style={{ padding: "10px 20px", backgroundColor: currentTheme.light }}>NEW GAME</button>
           </div>
         )}
         <div style={{ width: "550px", border: `12px solid ${currentTheme.dark}` }}>
           <Chessboard position={game.fen()} onPieceDrop={onDrop} onSquareClick={getMoveOptions} customPieces={customPieces} customDarkSquareStyle={{ backgroundColor: currentTheme.dark }} customLightSquareStyle={{ backgroundColor: currentTheme.light }} />
         </div>
-        <div style={{ marginTop: "20px" }}>
-          <button onClick={() => window.location.reload()} style={{ padding: "10px 20px", background: "#444", color: "#fff", border: "none", borderRadius: "5px" }}>EXIT CLUB</button>
-        </div>
+        <button onClick={() => window.location.reload()} style={{ marginTop: "20px", padding: "10px 20px", background: "#444", color: "#fff", border: "none" }}>EXIT</button>
       </div>
-
       <div style={{ width: "80px", background: "#111", padding: "10px", borderRadius: "10px" }}>
         {whiteCaptured.map((p, i) => <img key={i} src={`${currentTheme.path}b${p.toLowerCase()}.png`} style={{ width: "30px" }} alt="lost" />)}
       </div>
