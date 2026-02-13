@@ -15,7 +15,7 @@ export default function GameBoard({ themeKey }) {
   const [audioUnlocked, setAudioUnlocked] = useState(false);
   const [difficulty, setDifficulty] = useState(5);
   const [gameOverMessage, setGameOverMessage] = useState(null);
-  const [isJoining, setIsJoining] = useState(false); // New: prevents crash on double-click
+  const [isJoining, setIsJoining] = useState(false);
 
   const bgMusic = useRef(null);
   const stockfish = useRef(null);
@@ -27,46 +27,49 @@ export default function GameBoard({ themeKey }) {
   };
   const currentTheme = themes[themeKey] || themes.mickey;
 
-  // --- 1. REALTIME LISTENER ---
- // --- 1. REALTIME LISTENER (FILTERED) ---
-  useEffect(() => {
-    // Only run this if we are in PvP and both players are logged in
-    if (gameMode !== "pvp" || !player1?.username || !player2?.username) return;
+  // --- 1. TREASURY LOGIC (COIN UPDATES) ---
+  const updateCoins = async (username, diff) => {
+    if (!username || username === "Stockfish AI") return;
 
-    const channel = supabase
-      .channel('realtime-chess')
-      .on(
-        'postgres_changes',
-        { 
-          event: 'UPDATE', 
-          schema: 'public', 
-          table: 'games',
-          // FILTER: Only listen to rows involving these two players
-          filter: `white_player=in.(${player1.username},${player2.username})` 
-        },
-        (payload) => {
-          const newFen = payload.new.fen;
-          
-          // Only update if the FEN is actually different to avoid "shaking" pieces
-          if (newFen !== game.fen()) {
-            console.log("Syncing move from cloud...");
-            const updatedGame = new Chess(newFen);
-            setGame(updatedGame);
-            // Re-check game over status for the other player's move
-            if (updatedGame.isGameOver()) {
-                checkGameOver(updatedGame);
-            }
-          }
-        }
-      )
-      .subscribe((status) => {
-        console.log("Realtime status:", status);
-      });
+    // Fetch current coins
+    const { data } = await supabase.from('treasury').select('coins').eq('username', username).single();
+    
+    if (data) {
+      const currentCoins = data.coins || 0;
+      // Calculate new total, but don't go below 0
+      const newTotal = Math.max(0, currentCoins + diff);
+      
+      await supabase
+        .from('treasury')
+        .update({ coins: newTotal })
+        .eq('username', username);
+    }
+  };
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [gameMode, player1, player2, game]);
+  const checkGameOver = async (gameInstance) => {
+    if (!gameInstance.isGameOver() || gameOverMessage) return;
+
+    let msg = "";
+    if (gameInstance.isCheckmate()) {
+      const winnerColor = gameInstance.turn() === 'w' ? 'b' : 'w';
+      const winnerName = winnerColor === 'w' ? player1?.username : player2?.username;
+      const loserName = winnerColor === 'w' ? player2?.username : player1?.username;
+
+      msg = `${winnerName} Wins! (+3 🪙)`;
+      
+      // Award Winner and Deduct Loser
+      await updateCoins(winnerName, 3);
+      await updateCoins(loserName, -3);
+    } else {
+      msg = "Draw! (+1 🪙 each)";
+      // Award both for a draw
+      await updateCoins(player1?.username, 1);
+      await updateCoins(player2?.username, 1);
+    }
+
+    setGameOverMessage(msg);
+    fetchTreasury(); // Refresh leaderboard
+  };
 
   // --- 2. FETCH LEADERBOARD ---
   const fetchTreasury = async () => {
@@ -76,72 +79,73 @@ export default function GameBoard({ themeKey }) {
 
   useEffect(() => { fetchTreasury(); }, []);
 
-  // --- 3. START GAME (SAFE MATCHMAKING) ---
+  // --- 3. REALTIME LISTENER ---
+  useEffect(() => {
+    if (gameMode !== "pvp" || !player1 || !player2) return;
+    const channel = supabase
+      .channel('realtime-chess')
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'games' }, (payload) => {
+        const newFen = payload.new.fen;
+        if (newFen !== game.fen()) {
+          const updatedGame = new Chess(newFen);
+          setGame(updatedGame);
+          if (updatedGame.isGameOver()) checkGameOver(updatedGame);
+        }
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [gameMode, player1, player2, game]);
+
+  // --- 4. START GAME ---
   const handleStartGame = async (e) => {
     e.preventDefault();
     if (!inputs.p1 || isJoining) return;
     setIsJoining(true);
 
-    // Force names to lowercase so "Dada" and "dada" match
-    const p1Name = inputs.p1.toLowerCase().trim();
-    const p2Name = inputs.p2.toLowerCase().trim();
-
     try {
-      // 1. Player 1 Login
-      let { data: u1 } = await supabase.from('treasury').select('*').eq('username', p1Name).maybeSingle();
+      let { data: u1 } = await supabase.from('treasury').select('*').eq('username', inputs.p1).maybeSingle();
       if (!u1) {
-        const { data: newUser } = await supabase.from('treasury').insert([{ username: p1Name, coins: 50 }]).select().single();
+        const { data: newUser } = await supabase.from('treasury').insert([{ username: inputs.p1, coins: 50 }]).select().single();
         u1 = newUser;
       }
       setPlayer1(u1);
 
-      // 2. PvP Matchmaking
-      if (gameMode === "pvp" && p2Name) {
-        // Look for a game involving both players in ANY order
-        const { data: existingGame, error } = await supabase
+      if (gameMode === "pvp" && inputs.p2) {
+        let { data: existingGame } = await supabase
           .from('games')
           .select('*')
-          .or(`and(white_player.eq.${p1Name},black_player.eq.${p2Name}),and(white_player.eq.${p2Name},black_player.eq.${p1Name})`)
+          .or(`and(white_player.eq.${inputs.p1},black_player.eq.${inputs.p2}),and(white_player.eq.${inputs.p2},black_player.eq.${inputs.p1})`)
           .maybeSingle();
 
         if (existingGame) {
-          console.log("Joining existing game:", existingGame.id);
           setGame(new Chess(existingGame.fen));
         } else {
-          console.log("Creating new game room");
-          await supabase.from('games').insert([
-            { 
-              white_player: p1Name, 
-              black_player: p2Name, 
-              fen: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1" 
-            }
-          ]);
+          await supabase.from('games').insert([{ white_player: inputs.p1, black_player: inputs.p2, fen: new Chess().fen() }]);
           setGame(new Chess());
         }
-        setPlayer2({ username: p2Name });
+        setPlayer2({ username: inputs.p2 });
       } else {
-        setPlayer2({ username: "Stockfish AI", coins: "∞" });
+        setPlayer2({ username: "Stockfish AI" });
         setGame(new Chess());
       }
       fetchTreasury();
     } catch (err) {
-      console.error("Matchmaking error:", err);
+      console.error(err);
     } finally {
       setIsJoining(false);
     }
   };
-  // --- 4. ENGINE (STOCKFISH) ---
+
+  // --- 5. ENGINE & MOVES ---
   useEffect(() => {
     stockfish.current = new Worker("/stockfish.js");
     stockfish.current.onmessage = (e) => {
       if (gameMode === "ai" && e.data.startsWith("bestmove")) {
         const moveStr = e.data.split(" ")[1];
         if (moveStr && moveStr !== "(none)") {
-          const aiMove = { from: moveStr.substring(0, 2), to: moveStr.substring(2, 4), promotion: "q" };
           setGame((prevGame) => {
             const gameCopy = new Chess(prevGame.fen());
-            gameCopy.move(aiMove);
-            handleMoveSounds(gameCopy.history({ verbose: true }).pop(), gameCopy);
+            gameCopy.move({ from: moveStr.substring(0, 2), to: moveStr.substring(2, 4), promotion: "q" });
             checkGameOver(gameCopy);
             return gameCopy;
           });
@@ -161,62 +165,23 @@ export default function GameBoard({ themeKey }) {
     }
   }, [game, difficulty, gameMode, player1]);
 
-  // --- 5. MOVE & BROADCAST ---
   async function onDrop(sourceSquare, targetSquare) {
     if (!audioUnlocked) setAudioUnlocked(true);
-    // Safety: Don't allow moves if players aren't fully loaded
-    if (!player1) return false;
-
     const gameCopy = new Chess(game.fen());
     try {
       const move = gameCopy.move({ from: sourceSquare, to: targetSquare, promotion: "q" });
       if (move === null) return false;
-
       setGame(gameCopy);
-      handleMoveSounds(move, gameCopy);
-
       if (gameMode === "pvp") {
-        await supabase
-          .from('games')
-          .update({ fen: gameCopy.fen() })
+        await supabase.from('games').update({ fen: gameCopy.fen() })
           .or(`and(white_player.eq.${player1.username},black_player.eq.${player2?.username}),and(white_player.eq.${player2?.username},black_player.eq.${player1.username})`);
       }
-
       checkGameOver(gameCopy);
       return true;
     } catch (e) { return false; }
   }
 
-  // --- 6. UTILITIES ---
-  const checkGameOver = async (gameInstance) => {
-    if (!gameInstance.isGameOver() || gameOverMessage) return;
-    let msg = gameInstance.isCheckmate() 
-      ? (gameInstance.turn() === 'w' ? "Black Wins!" : "White Wins!") 
-      : "Draw!";
-    setGameOverMessage(msg);
-  };
-
-  useEffect(() => {
-    if (bgMusic.current) { bgMusic.current.pause(); bgMusic.current.src = ""; }
-    bgMusic.current = new Audio(`${currentTheme.audioPath}theme.mp3`);
-    bgMusic.current.loop = true;
-    if (audioUnlocked && player1) bgMusic.current.play().catch(() => {});
-    return () => bgMusic.current?.pause();
-  }, [themeKey, audioUnlocked, player1]);
-
-  const playSound = (soundFile) => {
-    const audio = new Audio(`${currentTheme.audioPath}${soundFile}`);
-    audio.play().catch(() => {});
-  };
-
-  const handleMoveSounds = (move, gameInstance) => {
-    if (gameInstance.isCheckmate() && themeKey === "miraculous") {
-      playSound("blackking_capture.mp3");
-    } else if (move && move.captured) {
-      playSound(move.color === 'w' ? "white_capture.mp3" : "black_capture.mp3");
-    }
-  };
-
+  // --- THEMES & UI ---
   const customPieces = useMemo(() => {
     const pieces = ["wP", "wN", "wB", "wR", "wQ", "wK", "bP", "bN", "bB", "bR", "bQ", "bK"];
     const pieceMap = {};
@@ -226,25 +191,22 @@ export default function GameBoard({ themeKey }) {
       );
     });
     return pieceMap;
-  }, [currentTheme, themeKey]);
+  }, [currentTheme]);
 
-  // --- UI RENDER ---
   if (!player1) {
     return (
       <div style={{ padding: "40px", textAlign: "center", color: "white", backgroundColor: "#111", borderRadius: "20px", border: `4px solid ${currentTheme.light}`, maxWidth: "500px", margin: "100px auto" }}>
-        <h1 style={{ letterSpacing: "2px", color: currentTheme.light }}>TREASURE CHESS CLUB</h1>
+        <h1>THE TREASURE CHESS CLUB</h1>
         <div style={{ marginBottom: "20px" }}>
-          <button onClick={() => setGameMode("ai")} style={{ padding: "10px 20px", backgroundColor: gameMode === "ai" ? currentTheme.light : "#333", color: gameMode === "ai" ? "#000" : "#fff", cursor: "pointer", border: "none" }}>VS AI</button>
-          <button onClick={() => setGameMode("pvp")} style={{ padding: "10px 20px", backgroundColor: gameMode === "pvp" ? currentTheme.light : "#333", color: gameMode === "pvp" ? "#000" : "#fff", cursor: "pointer", border: "none" }}>VS PLAYER</button>
+          <button onClick={() => setGameMode("ai")} style={{ padding: "10px", backgroundColor: gameMode === "ai" ? currentTheme.light : "#333", color: gameMode === "ai" ? "#000" : "#fff", border: "none" }}>VS AI</button>
+          <button onClick={() => setGameMode("pvp")} style={{ padding: "10px", backgroundColor: gameMode === "pvp" ? currentTheme.light : "#333", color: gameMode === "pvp" ? "#000" : "#fff", border: "none" }}>VS PLAYER</button>
         </div>
         <form onSubmit={handleStartGame} style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-          <input type="text" placeholder="Your Username" value={inputs.p1} onChange={(e) => setInputs({...inputs, p1: e.target.value})} style={{ padding: "12px", borderRadius: "5px", color: "#000" }} required />
+          <input type="text" placeholder="Your Name" value={inputs.p1} onChange={(e) => setInputs({...inputs, p1: e.target.value})} style={{ padding: "12px", borderRadius: "5px" }} required />
           {gameMode === "pvp" && (
-            <input type="text" placeholder="Opponent Username" value={inputs.p2} onChange={(e) => setInputs({...inputs, p2: e.target.value})} style={{ padding: "12px", borderRadius: "5px", color: "#000" }} required />
+            <input type="text" placeholder="Opponent Name" value={inputs.p2} onChange={(e) => setInputs({...inputs, p2: e.target.value})} style={{ padding: "12px", borderRadius: "5px" }} required />
           )}
-          <button type="submit" disabled={isJoining} style={{ padding: "15px", backgroundColor: currentTheme.light, color: "#000", fontWeight: "bold", borderRadius: "5px", border: "none", cursor: "pointer" }}>
-            {isJoining ? "CONNECTING..." : "JOIN THE CLUB"}
-          </button>
+          <button type="submit" disabled={isJoining} style={{ padding: "15px", backgroundColor: currentTheme.light, fontWeight: "bold", cursor: "pointer" }}>{isJoining ? "CONNECTING..." : "JOIN CLUB"}</button>
         </form>
       </div>
     );
@@ -253,41 +215,25 @@ export default function GameBoard({ themeKey }) {
   return (
     <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: "40px", padding: "20px" }}>
       <div style={{ width: "250px", backgroundColor: "#000", padding: "20px", borderRadius: "15px", border: `2px solid ${currentTheme.light}`, color: "white" }}>
-        <h3 style={{ color: currentTheme.light, textAlign: "center", margin: 0 }}>GLOBAL TREASURY</h3>
-        <hr style={{ borderColor: "#222" }} />
+        <h3 style={{ color: currentTheme.light }}>MEMBERS</h3>
         {treasury.map((u, i) => (
-          <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid #111" }}>
+          <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "5px 0" }}>
             <span>{u.username}</span>
             <span style={{ color: "#ffd700" }}>🪙 {u.coins}</span>
           </div>
         ))}
       </div>
-
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
-        <h2 style={{ color: "white", textTransform: "uppercase", letterSpacing: "3px" }}>Treasure Chess Club</h2>
-        
-        {/* FIXED: Using optional chaining ?. to prevent the "properties of null" crash */}
-        <div style={{ marginBottom: "20px", color: "white", backgroundColor: "#111", padding: "10px 20px", borderRadius: "50px", border: "1px solid #333" }}>
-          ⚪ {player1?.username || "..."} vs ⚫ {player2?.username || "..."}
-        </div>
-
+      <div style={{ textAlign: "center" }}>
+        <h2 style={{ color: "white" }}>{player1?.username} vs {player2?.username}</h2>
         {gameOverMessage && (
-          <div style={{ position: "absolute", top: "40%", zIndex: 100, backgroundColor: "#000", color: currentTheme.light, padding: "30px", borderRadius: "15px", border: `4px solid ${currentTheme.light}`, textAlign: "center" }}>
-            <h2>{gameOverMessage}</h2>
-            <button onClick={() => { setGame(new Chess()); setGameOverMessage(null); }} style={{ padding: "10px 25px", cursor: "pointer", backgroundColor: currentTheme.light, border: "none" }}>PLAY AGAIN</button>
+          <div style={{ padding: "20px", backgroundColor: "#000", color: currentTheme.light, border: `3px solid ${currentTheme.light}`, marginBottom: "10px" }}>
+            <h3>{gameOverMessage}</h3>
+            <button onClick={() => { setGame(new Chess()); setGameOverMessage(null); }} style={{ padding: "10px", backgroundColor: currentTheme.light, cursor: "pointer" }}>PLAY AGAIN</button>
           </div>
         )}
-
-        <div style={{ width: "min(500px, 95vw)", border: `12px solid ${currentTheme.dark}`, backgroundColor: currentTheme.dark }}>
-          <Chessboard 
-            position={game.fen()} 
-            onPieceDrop={onDrop} 
-            customPieces={customPieces}
-            customDarkSquareStyle={{ backgroundColor: currentTheme.dark }}
-            customLightSquareStyle={{ backgroundColor: currentTheme.light }}
-          />
+        <div style={{ width: "min(500px, 95vw)", border: `12px solid ${currentTheme.dark}` }}>
+          <Chessboard position={game.fen()} onPieceDrop={onDrop} customPieces={customPieces} customDarkSquareStyle={{ backgroundColor: currentTheme.dark }} customLightSquareStyle={{ backgroundColor: currentTheme.light }} />
         </div>
-        <button onClick={() => { setPlayer1(null); setPlayer2(null); }} style={{ marginTop: "20px", color: "#666", fontSize: "11px", background: "none", border: "none", cursor: "pointer" }}>Logout</button>
       </div>
     </div>
   );
