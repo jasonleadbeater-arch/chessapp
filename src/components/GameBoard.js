@@ -77,7 +77,11 @@ export default function GameBoard({ themeKey }) {
     fetchData();
   };
 
-  const playSound = (f) => { if (audioUnlocked) new Audio(`${currentTheme.audioPath}${f}`).play().catch(() => {}); };
+  const playSound = (f) => { 
+    if (!audioUnlocked) return;
+    const audio = new Audio(`${currentTheme.audioPath}${f}`);
+    audio.play().catch(e => console.log("Sound error:", e));
+  };
 
   useEffect(() => {
     stockfish.current = new Worker('/stockfish.js');
@@ -137,7 +141,7 @@ export default function GameBoard({ themeKey }) {
 
   const handleStartGame = async (e, existingOpponent = null) => {
     if (e) e.preventDefault();
-    setAudioUnlocked(true);
+    setAudioUnlocked(true); // Ensure audio is unlocked on form submit
     const p1 = inputs.p1.toLowerCase().trim();
     const p2 = (existingOpponent || inputs.p2 || "").toLowerCase().trim();
     if (!p1) return;
@@ -158,27 +162,38 @@ export default function GameBoard({ themeKey }) {
     } finally { setIsJoining(false); }
   };
 
-  // --- THEME MUSIC TRIGGERED ON THEME SELECTION ---
+  // --- THEME MUSIC (FIXED LOGIC) ---
   useEffect(() => {
-    const startMusic = () => {
-        if (bgMusic.current) bgMusic.current.pause();
-        bgMusic.current = new Audio(`${currentTheme.audioPath}theme.mp3`);
-        bgMusic.current.loop = true;
-        bgMusic.current.volume = 0.3;
-        bgMusic.current.play().catch(() => {
-          console.log("Music waiting for user interaction...");
-        });
-    };
+    if (!audioUnlocked) return;
 
-    // Trigger music if audio is unlocked or whenever themeKey changes
-    startMusic();
+    if (bgMusic.current) {
+        bgMusic.current.pause();
+        bgMusic.current.src = ""; // Clear current source
+    }
+
+    const musicPath = `${currentTheme.audioPath}theme.mp3`;
+    bgMusic.current = new Audio(musicPath);
+    bgMusic.current.loop = true;
+    bgMusic.current.volume = 0.3;
     
-    return () => bgMusic.current?.pause();
+    const playPromise = bgMusic.current.play();
+    if (playPromise !== undefined) {
+        playPromise.catch(error => {
+            console.log("Autoplay blocked. User must click first.");
+        });
+    }
+
+    return () => {
+        if (bgMusic.current) bgMusic.current.pause();
+    };
   }, [themeKey, audioUnlocked]);
 
-  // Unlock audio globally on first click of the container
-  const handleGlobalClick = () => {
-    if (!audioUnlocked) setAudioUnlocked(true);
+  // Use this to unlock audio the very first time the user interacts with the app
+  const unlockAudio = () => {
+    if (!audioUnlocked) {
+      setAudioUnlocked(true);
+      console.log("Audio Unlocked");
+    }
   };
 
   // --- THEME PIECES ---
@@ -198,13 +213,18 @@ export default function GameBoard({ themeKey }) {
   // --- UI: MAIN LOBBY ---
   if (!player1) {
     return (
-      <div onClick={handleGlobalClick} style={{ minHeight: "100vh", backgroundColor: "#000", color: "white", padding: "20px", textAlign: "center" }}>
+      <div 
+        onClick={unlockAudio} 
+        style={{ minHeight: "100vh", backgroundColor: "#000", color: "white", padding: "20px", textAlign: "center", cursor: audioUnlocked ? "default" : "pointer" }}
+      >
+        {!audioUnlocked && <div style={{position: 'absolute', top: 10, width: '100%', fontSize: '12px', color: '#555'}}>Click anywhere to enable theme music 🎵</div>}
+        
         <h1 style={{ fontSize: "3rem", color: currentTheme.light, letterSpacing: "4px" }}>THE TREASURE CHESS CLUB</h1>
         
         <div style={{ display: "flex", justifyContent: "space-around", alignItems: "center", margin: "40px 0", flexWrap: "wrap" }}>
           <img src="/themes/mickey/pieces/wk.png" style={{ width: "120px", filter: "drop-shadow(0 0 10px gold)" }} alt="Mickey" />
           
-          <div style={{ padding: "30px", backgroundColor: "#111", borderRadius: "20px", border: `4px solid ${currentTheme.light}`, width: "400px" }}>
+          <div style={{ padding: "30px", backgroundColor: "#111", borderRadius: "20px", border: `4px solid ${currentTheme.light}`, width: "400px" }} onClick={(e) => e.stopPropagation()}>
              <div style={{ display: "flex", gap: "10px", marginBottom: "20px" }}>
                 <button onClick={() => setGameMode("ai")} style={{ flex: 1, padding: "10px", backgroundColor: gameMode === "ai" ? currentTheme.light : "#333", border: "none", cursor: "pointer", fontWeight: "bold" }}>VS AI</button>
                 <button onClick={() => setGameMode("pvp")} style={{ flex: 1, padding: "10px", backgroundColor: gameMode === "pvp" ? currentTheme.light : "#333", border: "none", cursor: "pointer", fontWeight: "bold" }}>VS PLAYER</button>
