@@ -28,26 +28,44 @@ export default function GameBoard({ themeKey }) {
   const currentTheme = themes[themeKey] || themes.mickey;
 
   // --- 1. REALTIME LISTENER ---
+ // --- 1. REALTIME LISTENER (FILTERED) ---
   useEffect(() => {
-    if (gameMode !== "pvp" || !player1 || !player2) return;
+    // Only run this if we are in PvP and both players are logged in
+    if (gameMode !== "pvp" || !player1?.username || !player2?.username) return;
 
     const channel = supabase
       .channel('realtime-chess')
       .on(
         'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'games' },
+        { 
+          event: 'UPDATE', 
+          schema: 'public', 
+          table: 'games',
+          // FILTER: Only listen to rows involving these two players
+          filter: `white_player=in.(${player1.username},${player2.username})` 
+        },
         (payload) => {
           const newFen = payload.new.fen;
+          
+          // Only update if the FEN is actually different to avoid "shaking" pieces
           if (newFen !== game.fen()) {
+            console.log("Syncing move from cloud...");
             const updatedGame = new Chess(newFen);
             setGame(updatedGame);
-            checkGameOver(updatedGame);
+            // Re-check game over status for the other player's move
+            if (updatedGame.isGameOver()) {
+                checkGameOver(updatedGame);
+            }
           }
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        console.log("Realtime status:", status);
+      });
 
-    return () => { supabase.removeChannel(channel); };
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [gameMode, player1, player2, game]);
 
   // --- 2. FETCH LEADERBOARD ---
@@ -64,57 +82,50 @@ export default function GameBoard({ themeKey }) {
     if (!inputs.p1 || isJoining) return;
     setIsJoining(true);
 
+    // Force names to lowercase so "Dada" and "dada" match
+    const p1Name = inputs.p1.toLowerCase().trim();
+    const p2Name = inputs.p2.toLowerCase().trim();
+
     try {
-      // 1. Fetch Player 1
-      const { data: u1, error: u1Error } = await supabase
-        .from('treasury')
-        .select('*')
-        .eq('username', inputs.p1)
-        .maybeSingle(); // maybeSingle is safer than single()
-
-      if (u1Error) throw new Error("Database error fetching user");
-
-      let activeUser = u1;
+      // 1. Player 1 Login
+      let { data: u1 } = await supabase.from('treasury').select('*').eq('username', p1Name).maybeSingle();
       if (!u1) {
-        // Create user if they don't exist
-        const { data: newUser, error: createError } = await supabase
-          .from('treasury')
-          .insert([{ username: inputs.p1, coins: 50 }])
-          .select()
-          .single();
-        if (createError) throw new Error("Could not create user");
-        activeUser = newUser;
+        const { data: newUser } = await supabase.from('treasury').insert([{ username: p1Name, coins: 50 }]).select().single();
+        u1 = newUser;
       }
-      
-      // STOP HERE if we couldn't get a user. This prevents the crash!
-      if (!activeUser) return;
-      setPlayer1(activeUser);
+      setPlayer1(u1);
 
       // 2. PvP Matchmaking
-      if (gameMode === "pvp" && inputs.p2) {
-        const { data: existingGame } = await supabase
+      if (gameMode === "pvp" && p2Name) {
+        // Look for a game involving both players in ANY order
+        const { data: existingGame, error } = await supabase
           .from('games')
           .select('*')
-          .or(`and(white_player.eq.${inputs.p1},black_player.eq.${inputs.p2}),and(white_player.eq.${inputs.p2},black_player.eq.${inputs.p1})`)
+          .or(`and(white_player.eq.${p1Name},black_player.eq.${p2Name}),and(white_player.eq.${p2Name},black_player.eq.${p1Name})`)
           .maybeSingle();
 
         if (existingGame) {
+          console.log("Joining existing game:", existingGame.id);
           setGame(new Chess(existingGame.fen));
         } else {
+          console.log("Creating new game room");
           await supabase.from('games').insert([
-            { white_player: inputs.p1, black_player: inputs.p2, fen: new Chess().fen() }
+            { 
+              white_player: p1Name, 
+              black_player: p2Name, 
+              fen: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1" 
+            }
           ]);
           setGame(new Chess());
         }
-        setPlayer2({ username: inputs.p2 });
+        setPlayer2({ username: p2Name });
       } else {
         setPlayer2({ username: "Stockfish AI", coins: "∞" });
         setGame(new Chess());
       }
       fetchTreasury();
     } catch (err) {
-      console.error("Matchmaking failed:", err.message);
-      alert("Connection error. Please check if your Supabase columns are named correctly!");
+      console.error("Matchmaking error:", err);
     } finally {
       setIsJoining(false);
     }
