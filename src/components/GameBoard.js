@@ -13,7 +13,7 @@ export default function GameBoard({ themeKey }) {
   const [treasury, setTreasury] = useState([]);
   const [liveGames, setLiveGames] = useState([]);
   const [game, setGame] = useState(new Chess());
-  const [optionSquares, setOptionSquares] = useState({}); // For Legal Move Dots
+  const [optionSquares, setOptionSquares] = useState({});
   const [audioUnlocked, setAudioUnlocked] = useState(false);
   const [gameOverMessage, setGameOverMessage] = useState(null);
   const [isJoining, setIsJoining] = useState(false);
@@ -28,11 +28,11 @@ export default function GameBoard({ themeKey }) {
   };
   const currentTheme = themes[themeKey] || themes.mickey;
 
-  // --- CAPTURED PIECES CALCULATION ---
+  // --- CAPTURED PIECES ---
   const getCapturedPieces = () => {
     const history = game.history({ verbose: true });
-    const whiteCaptured = []; // Pieces white has lost (captured by black)
-    const blackCaptured = []; // Pieces black has lost (captured by white)
+    const whiteCaptured = [];
+    const blackCaptured = [];
     history.forEach((m) => {
       if (m.captured) {
         if (m.color === "w") blackCaptured.push(m.captured);
@@ -42,7 +42,7 @@ export default function GameBoard({ themeKey }) {
     return { whiteCaptured, blackCaptured };
   };
 
-  // --- LEGAL MOVE DOTS ---
+  // --- DOTS / LEGAL MOVES ---
   function getMoveOptions(square) {
     const moves = game.moves({ square, verbose: true });
     if (moves.length === 0) return false;
@@ -61,51 +61,7 @@ export default function GameBoard({ themeKey }) {
     return true;
   }
 
-  // --- CORE GAME ACTIONS ---
-  const updateCoins = async (u, d) => {
-    if (!u || u === "Stockfish AI") return;
-    const { data } = await supabase.from('treasury').select('coins').eq('username', u).single();
-    if (data) await supabase.from('treasury').update({ coins: Math.max(0, data.coins + d) }).eq('username', u);
-    fetchData();
-  };
-
-  const handleResign = async () => {
-    if (!player1 || !player2) return;
-    await updateCoins(player2.username, 3);
-    await updateCoins(player1.username, -3);
-    setGameOverMessage(`${player1.username} Resigned. ${player2.username} Wins!`);
-  };
-
-  const handleUndo = () => {
-    if (gameMode !== "ai") return;
-    game.undo(); game.undo(); // Undo AI and Player
-    setGame(new Chess(game.fen()));
-    setOptionSquares({});
-  };
-
-  const handleDrawOffer = async () => {
-    await updateCoins(player1.username, 1);
-    await updateCoins(player2.username, 1);
-    setGameOverMessage("Game Ended in a Mutual Draw!");
-  };
-
-  const checkGameOver = async (gameInstance) => {
-    if (!gameInstance.isGameOver() || gameOverMessage) return;
-    let msg = "";
-    if (gameInstance.isCheckmate()) {
-      const winnerColor = gameInstance.turn() === 'w' ? 'b' : 'w';
-      const winName = winnerColor === 'w' ? player1?.username : player2?.username;
-      const loseName = winnerColor === 'w' ? player2?.username : player1?.username;
-      msg = `${winName} Wins by Checkmate! (+3 🪙)`;
-      await updateCoins(winName, 3); await updateCoins(loseName, -3);
-    } else {
-      msg = "Draw! (+1 🪙)";
-      await updateCoins(player1?.username, 1); await updateCoins(player2?.username, 1);
-    }
-    setGameOverMessage(msg);
-  };
-
-  // --- DATA FETCHING ---
+  // --- DATABASE & ENGINE ---
   const fetchData = async () => {
     const { data: m } = await supabase.from('treasury').select('*').order('coins', { ascending: false });
     if (m) setTreasury(m);
@@ -114,9 +70,15 @@ export default function GameBoard({ themeKey }) {
   };
   useEffect(() => { fetchData(); }, []);
 
-  // --- SOUNDS & ENGINE ---
+  const updateCoins = async (u, d) => {
+    if (!u || u === "Stockfish AI") return;
+    const { data } = await supabase.from('treasury').select('coins').eq('username', u).single();
+    if (data) await supabase.from('treasury').update({ coins: Math.max(0, data.coins + d) }).eq('username', u);
+    fetchData();
+  };
+
   const playSound = (f) => { if (audioUnlocked) new Audio(`${currentTheme.audioPath}${f}`).play().catch(() => {}); };
-  
+
   useEffect(() => {
     stockfish.current = new Worker('/stockfish.js');
     stockfish.current.onmessage = (e) => {
@@ -139,17 +101,21 @@ export default function GameBoard({ themeKey }) {
     }
   }, [game]);
 
-  // --- PIECE THEMES ---
-  const customPieces = useMemo(() => {
-    const pieces = ["wP", "wN", "wB", "wR", "wQ", "wK", "bP", "bN", "bB", "bR", "bQ", "bK"];
-    const pieceMap = {};
-    pieces.forEach((p) => {
-      pieceMap[p] = ({ squareWidth }) => (
-        <img src={`${currentTheme.path}${p.toLowerCase()}.png`} style={{ width: squareWidth, height: squareWidth }} alt={p} />
-      );
-    });
-    return pieceMap;
-  }, [currentTheme]);
+  const checkGameOver = async (gameInstance) => {
+    if (!gameInstance.isGameOver() || gameOverMessage) return;
+    let msg = "";
+    if (gameInstance.isCheckmate()) {
+      const winnerColor = gameInstance.turn() === 'w' ? 'b' : 'w';
+      const winName = winnerColor === 'w' ? player1?.username : player2?.username;
+      const loseName = winnerColor === 'w' ? player2?.username : player1?.username;
+      msg = `${winName} Wins! (+3 🪙)`;
+      await updateCoins(winName, 3); await updateCoins(loseName, -3);
+    } else {
+      msg = "Draw! (+1 🪙)";
+      await updateCoins(player1?.username, 1); await updateCoins(player2?.username, 1);
+    }
+    setGameOverMessage(msg);
+  };
 
   // --- HANDLERS ---
   async function onDrop(source, target) {
@@ -192,30 +158,56 @@ export default function GameBoard({ themeKey }) {
     } finally { setIsJoining(false); }
   };
 
+  // --- THEME PIECES ---
+  const customPieces = useMemo(() => {
+    const pieces = ["wP", "wN", "wB", "wR", "wQ", "wK", "bP", "bN", "bB", "bR", "bQ", "bK"];
+    const pieceMap = {};
+    pieces.forEach((p) => {
+      pieceMap[p] = ({ squareWidth }) => (
+        <img src={`${currentTheme.path}${p.toLowerCase()}.png`} style={{ width: squareWidth, height: squareWidth }} alt={p} />
+      );
+    });
+    return pieceMap;
+  }, [currentTheme]);
+
   const { whiteCaptured, blackCaptured } = getCapturedPieces();
 
-  // --- RENDER LOBBY ---
+  // --- UI: MAIN LOBBY ---
   if (!player1) {
     return (
       <div style={{ minHeight: "100vh", backgroundColor: "#000", color: "white", padding: "20px", textAlign: "center" }}>
         <h1 style={{ fontSize: "3rem", color: currentTheme.light, letterSpacing: "4px" }}>THE TREASURE CHESS CLUB</h1>
-        <div style={{ display: "flex", justifyContent: "space-around", alignItems: "center", margin: "40px 0" }}>
+        
+        <div style={{ display: "flex", justifyContent: "space-around", alignItems: "center", margin: "40px 0", flexWrap: "wrap" }}>
           <img src="/themes/mickey/pieces/wk.png" style={{ width: "120px", filter: "drop-shadow(0 0 10px gold)" }} alt="Mickey" />
+          
           <div style={{ padding: "30px", backgroundColor: "#111", borderRadius: "20px", border: `4px solid ${currentTheme.light}`, width: "400px" }}>
              <div style={{ display: "flex", gap: "10px", marginBottom: "20px" }}>
-                <button onClick={() => setGameMode("ai")} style={{ flex: 1, padding: "10px", backgroundColor: gameMode === "ai" ? currentTheme.light : "#333", border: "none" }}>VS AI</button>
-                <button onClick={() => setGameMode("pvp")} style={{ flex: 1, padding: "10px", backgroundColor: gameMode === "pvp" ? currentTheme.light : "#333", border: "none" }}>VS PLAYER</button>
+                <button onClick={() => setGameMode("ai")} style={{ flex: 1, padding: "10px", backgroundColor: gameMode === "ai" ? currentTheme.light : "#333", border: "none", cursor: "pointer", fontWeight: "bold" }}>VS AI</button>
+                <button onClick={() => setGameMode("pvp")} style={{ flex: 1, padding: "10px", backgroundColor: gameMode === "pvp" ? currentTheme.light : "#333", border: "none", cursor: "pointer", fontWeight: "bold" }}>VS PLAYER</button>
              </div>
              <form onSubmit={handleStartGame} style={{ display: "flex", flexDirection: "column", gap: "15px" }}>
                 <input placeholder="Your Name" value={inputs.p1} onChange={(e) => setInputs({...inputs, p1: e.target.value})} style={{ padding: "12px", borderRadius: "5px", color: "#000" }} required />
                 {gameMode === "pvp" && <input placeholder="Opponent Name" value={inputs.p2} onChange={(e) => setInputs({...inputs, p2: e.target.value})} style={{ padding: "12px", borderRadius: "5px", color: "#000" }} />}
-                <button type="submit" style={{ padding: "15px", backgroundColor: currentTheme.light, color: "#000", fontWeight: "bold" }}>ENTER CLUB</button>
+                <button type="submit" style={{ padding: "15px", backgroundColor: currentTheme.light, color: "#000", fontWeight: "bold", cursor: "pointer" }}>ENTER CLUB</button>
              </form>
+             {gameMode === "pvp" && liveGames.length > 0 && (
+               <div style={{ marginTop: "20px", textAlign: "left" }}>
+                 <p style={{ fontSize: "12px", color: currentTheme.light }}>OR JOIN A LIVE TABLE:</p>
+                 {liveGames.map((g, i) => (
+                   <button key={i} onClick={() => handleStartGame(null, g.white_player === inputs.p1 ? g.black_player : g.white_player)} style={{ width: "100%", padding: "8px", margin: "2px 0", background: "#222", color: "#fff", border: "1px solid #444", cursor: "pointer", fontSize: "11px" }}>
+                     {g.white_player} vs {g.black_player}
+                   </button>
+                 ))}
+               </div>
+             )}
           </div>
+
           <img src="/themes/miraculous/pieces/wq.png" style={{ width: "120px", filter: "drop-shadow(0 0 10px red)" }} alt="Ladybug" />
         </div>
+
         <h2 style={{ color: currentTheme.light }}>CLUB MEMBERS</h2>
-        <div style={{ display: "flex", justifyContent: "center", gap: "10px", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", justifyContent: "center", gap: "10px", flexWrap: "wrap", padding: "20px" }}>
           {treasury.map((u, i) => (
             <div key={i} style={{ padding: "8px 15px", background: "#222", borderRadius: "20px", border: `1px solid ${currentTheme.light}` }}>
               {u.username} <span style={{ color: "gold" }}>🪙 {u.coins}</span>
@@ -226,11 +218,11 @@ export default function GameBoard({ themeKey }) {
     );
   }
 
-  // --- RENDER GAME ---
+  // --- UI: GAME BOARD ---
   return (
     <div style={{ display: "flex", justifyContent: "center", alignItems: "flex-start", padding: "40px", backgroundColor: "#000", minHeight: "100vh", color: "white" }}>
       
-      {/* CAPTURED BY BLACK (Pieces White Lost) */}
+      {/* LOST BY WHITE */}
       <div style={{ width: "80px", display: "flex", flexDirection: "column", gap: "5px", alignItems: "center", background: "#111", padding: "10px", borderRadius: "10px" }}>
         <p style={{ fontSize: "10px", color: "#666" }}>LOST</p>
         {blackCaptured.map((p, i) => <img key={i} src={`${currentTheme.path}w${p.toLowerCase()}.png`} style={{ width: "30px" }} alt="lost" />)}
@@ -240,7 +232,7 @@ export default function GameBoard({ themeKey }) {
         <h2 style={{ marginBottom: "20px" }}>{player1.username} VS {player2?.username}</h2>
         
         {gameOverMessage && (
-          <div style={{ position: "absolute", zIndex: 100, top: "20%", left: "50%", transform: "translateX(-50%)", backgroundColor: "#000", padding: "40px", border: `5px solid ${currentTheme.light}`, boxShadow: "0 0 50px #000" }}>
+          <div style={{ position: "absolute", zIndex: 100, top: "20%", left: "50%", transform: "translateX(-50%)", backgroundColor: "#000", padding: "40px", border: `5px solid ${currentTheme.light}` }}>
             <h1>{gameOverMessage}</h1>
             <button onClick={() => { setGame(new Chess()); setGameOverMessage(null); }} style={{ padding: "15px 30px", backgroundColor: currentTheme.light, fontWeight: "bold", border: "none", cursor: "pointer" }}>NEW GAME</button>
           </div>
@@ -258,16 +250,15 @@ export default function GameBoard({ themeKey }) {
           />
         </div>
 
-        {/* CONTROLS */}
         <div style={{ marginTop: "20px", display: "flex", gap: "10px", justifyContent: "center" }}>
-          {gameMode === "ai" && <button onClick={handleUndo} style={btnStyle}>UNDO</button>}
-          <button onClick={handleDrawOffer} style={btnStyle}>OFFER DRAW</button>
-          <button onClick={handleResign} style={{ ...btnStyle, backgroundColor: "#600" }}>RESIGN</button>
+          {gameMode === "ai" && <button onClick={() => { game.undo(); game.undo(); setGame(new Chess(game.fen())); }} style={btnStyle}>UNDO</button>}
+          <button onClick={() => { updateCoins(player1.username, 1); updateCoins(player2.username, 1); setGameOverMessage("Draw Agreed!"); }} style={btnStyle}>OFFER DRAW</button>
+          <button onClick={async () => { await updateCoins(player2.username, 3); await updateCoins(player1.username, -3); setGameOverMessage(`${player1.username} Resigned!`); }} style={{ ...btnStyle, backgroundColor: "#600" }}>RESIGN</button>
           <button onClick={() => window.location.reload()} style={{ ...btnStyle, backgroundColor: "#333" }}>EXIT</button>
         </div>
       </div>
 
-      {/* CAPTURED BY WHITE (Pieces Black Lost) */}
+      {/* LOST BY BLACK */}
       <div style={{ width: "80px", display: "flex", flexDirection: "column", gap: "5px", alignItems: "center", background: "#111", padding: "10px", borderRadius: "10px" }}>
         <p style={{ fontSize: "10px", color: "#666" }}>LOST</p>
         {whiteCaptured.map((p, i) => <img key={i} src={`${currentTheme.path}b${p.toLowerCase()}.png`} style={{ width: "30px" }} alt="lost" />)}
