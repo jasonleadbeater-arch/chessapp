@@ -15,6 +15,7 @@ export default function GameBoard({ themeKey }) {
   const [audioUnlocked, setAudioUnlocked] = useState(false);
   const [difficulty, setDifficulty] = useState(5);
   const [gameOverMessage, setGameOverMessage] = useState(null);
+  const [isJoining, setIsJoining] = useState(false); // New: prevents crash on double-click
 
   const bgMusic = useRef(null);
   const stockfish = useRef(null);
@@ -30,7 +31,6 @@ export default function GameBoard({ themeKey }) {
   useEffect(() => {
     if (gameMode !== "pvp" || !player1 || !player2) return;
 
-    // Listen for board updates from the database
     const channel = supabase
       .channel('realtime-chess')
       .on(
@@ -38,7 +38,6 @@ export default function GameBoard({ themeKey }) {
         { event: 'UPDATE', schema: 'public', table: 'games' },
         (payload) => {
           const newFen = payload.new.fen;
-          // Only update local state if the incoming move is new
           if (newFen !== game.fen()) {
             const updatedGame = new Chess(newFen);
             setGame(updatedGame);
@@ -59,42 +58,47 @@ export default function GameBoard({ themeKey }) {
 
   useEffect(() => { fetchTreasury(); }, []);
 
-  // --- 3. START GAME (PVP MATCHMAKING) ---
+  // --- 3. START GAME (SAFE MATCHMAKING) ---
   const handleStartGame = async (e) => {
     e.preventDefault();
-    if (!inputs.p1) return;
+    if (!inputs.p1 || isJoining) return;
+    setIsJoining(true);
 
-    // Login/Create Player 1
-    let { data: u1 } = await supabase.from('treasury').select('*').eq('username', inputs.p1).single();
-    if (!u1) {
-      const { data: newUser } = await supabase.from('treasury').insert([{ username: inputs.p1, coins: 50 }]).select().single();
-      u1 = newUser;
-    }
-    setPlayer1(u1);
+    try {
+      // Login/Create Player 1
+      let { data: u1 } = await supabase.from('treasury').select('*').eq('username', inputs.p1).single();
+      if (!u1) {
+        const { data: newUser } = await supabase.from('treasury').insert([{ username: inputs.p1, coins: 50 }]).select().single();
+        u1 = newUser;
+      }
+      setPlayer1(u1);
 
-    if (gameMode === "pvp" && inputs.p2) {
-      // Find game room where p1 and p2 are either white or black
-      let { data: existingGame } = await supabase
-        .from('games')
-        .select('*')
-        .or(`and(white_player.eq.${inputs.p1},black_player.eq.${inputs.p2}),and(white_player.eq.${inputs.p2},black_player.eq.${inputs.p1})`)
-        .single();
+      if (gameMode === "pvp" && inputs.p2) {
+        let { data: existingGame } = await supabase
+          .from('games')
+          .select('*')
+          .or(`and(white_player.eq.${inputs.p1},black_player.eq.${inputs.p2}),and(white_player.eq.${inputs.p2},black_player.eq.${inputs.p1})`)
+          .single();
 
-      if (existingGame) {
-        setGame(new Chess(existingGame.fen));
+        if (existingGame) {
+          setGame(new Chess(existingGame.fen));
+        } else {
+          await supabase.from('games').insert([
+            { white_player: inputs.p1, black_player: inputs.p2, fen: new Chess().fen() }
+          ]);
+          setGame(new Chess());
+        }
+        setPlayer2({ username: inputs.p2 });
       } else {
-        // Create new game if none found
-        await supabase.from('games').insert([
-          { white_player: inputs.p1, black_player: inputs.p2, fen: new Chess().fen() }
-        ]);
+        setPlayer2({ username: "Stockfish AI", coins: "∞" });
         setGame(new Chess());
       }
-      setPlayer2({ username: inputs.p2 });
-    } else {
-      setPlayer2({ username: "Stockfish AI", coins: "∞" });
-      setGame(new Chess());
+      fetchTreasury();
+    } catch (err) {
+      console.error("Login Error:", err);
+    } finally {
+      setIsJoining(false);
     }
-    fetchTreasury();
   };
 
   // --- 4. ENGINE (STOCKFISH) ---
@@ -131,6 +135,8 @@ export default function GameBoard({ themeKey }) {
   // --- 5. MOVE & BROADCAST ---
   async function onDrop(sourceSquare, targetSquare) {
     if (!audioUnlocked) setAudioUnlocked(true);
+    // Safety: Don't allow moves if players aren't fully loaded
+    if (!player1) return false;
 
     const gameCopy = new Chess(game.fen());
     try {
@@ -140,12 +146,11 @@ export default function GameBoard({ themeKey }) {
       setGame(gameCopy);
       handleMoveSounds(move, gameCopy);
 
-      // BROADCAST TO SUPABASE
       if (gameMode === "pvp") {
         await supabase
           .from('games')
           .update({ fen: gameCopy.fen() })
-          .or(`and(white_player.eq.${player1.username},black_player.eq.${player2.username}),and(white_player.eq.${player2.username},black_player.eq.${player1.username})`);
+          .or(`and(white_player.eq.${player1.username},black_player.eq.${player2?.username}),and(white_player.eq.${player2?.username},black_player.eq.${player1.username})`);
       }
 
       checkGameOver(gameCopy);
@@ -154,24 +159,12 @@ export default function GameBoard({ themeKey }) {
   }
 
   // --- 6. UTILITIES ---
-  const updateCoins = async (username, diff) => {
-    const { data } = await supabase.from('treasury').select('coins').eq('username', username).single();
-    if (data) {
-      await supabase.from('treasury').update({ coins: data.coins + diff }).eq('username', username);
-    }
-  };
-
   const checkGameOver = async (gameInstance) => {
     if (!gameInstance.isGameOver() || gameOverMessage) return;
-    let msg = "";
-    if (gameInstance.isCheckmate()) {
-      const winnerColor = gameInstance.turn() === 'w' ? 'b' : 'w';
-      msg = winnerColor === 'w' ? "White Wins!" : "Black Wins!";
-    } else {
-      msg = "Draw!";
-    }
+    let msg = gameInstance.isCheckmate() 
+      ? (gameInstance.turn() === 'w' ? "Black Wins!" : "White Wins!") 
+      : "Draw!";
     setGameOverMessage(msg);
-    fetchTreasury();
   };
 
   useEffect(() => {
@@ -206,7 +199,7 @@ export default function GameBoard({ themeKey }) {
     return pieceMap;
   }, [currentTheme, themeKey]);
 
-  // --- UI ---
+  // --- UI RENDER ---
   if (!player1) {
     return (
       <div style={{ padding: "40px", textAlign: "center", color: "white", backgroundColor: "#111", borderRadius: "20px", border: `4px solid ${currentTheme.light}`, maxWidth: "500px", margin: "100px auto" }}>
@@ -220,7 +213,9 @@ export default function GameBoard({ themeKey }) {
           {gameMode === "pvp" && (
             <input type="text" placeholder="Opponent Username" value={inputs.p2} onChange={(e) => setInputs({...inputs, p2: e.target.value})} style={{ padding: "12px", borderRadius: "5px", color: "#000" }} required />
           )}
-          <button type="submit" style={{ padding: "15px", backgroundColor: currentTheme.light, color: "#000", fontWeight: "bold", borderRadius: "5px", border: "none", cursor: "pointer" }}>JOIN THE CLUB</button>
+          <button type="submit" disabled={isJoining} style={{ padding: "15px", backgroundColor: currentTheme.light, color: "#000", fontWeight: "bold", borderRadius: "5px", border: "none", cursor: "pointer" }}>
+            {isJoining ? "CONNECTING..." : "JOIN THE CLUB"}
+          </button>
         </form>
       </div>
     );
@@ -241,14 +236,16 @@ export default function GameBoard({ themeKey }) {
 
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
         <h2 style={{ color: "white", textTransform: "uppercase", letterSpacing: "3px" }}>Treasure Chess Club</h2>
+        
+        {/* FIXED: Using optional chaining ?. to prevent the "properties of null" crash */}
         <div style={{ marginBottom: "20px", color: "white", backgroundColor: "#111", padding: "10px 20px", borderRadius: "50px", border: "1px solid #333" }}>
-          ⚪ {player1.username} vs ⚫ {player2.username}
+          ⚪ {player1?.username || "..."} vs ⚫ {player2?.username || "..."}
         </div>
 
         {gameOverMessage && (
           <div style={{ position: "absolute", top: "40%", zIndex: 100, backgroundColor: "#000", color: currentTheme.light, padding: "30px", borderRadius: "15px", border: `4px solid ${currentTheme.light}`, textAlign: "center" }}>
             <h2>{gameOverMessage}</h2>
-            <button onClick={() => { setGame(new Chess()); setGameOverMessage(null); fetchTreasury(); }} style={{ padding: "10px 25px", cursor: "pointer", backgroundColor: currentTheme.light, border: "none" }}>PLAY AGAIN</button>
+            <button onClick={() => { setGame(new Chess()); setGameOverMessage(null); }} style={{ padding: "10px 25px", cursor: "pointer", backgroundColor: currentTheme.light, border: "none" }}>PLAY AGAIN</button>
           </div>
         )}
 
@@ -261,7 +258,7 @@ export default function GameBoard({ themeKey }) {
             customLightSquareStyle={{ backgroundColor: currentTheme.light }}
           />
         </div>
-        <button onClick={() => setPlayer1(null)} style={{ marginTop: "20px", color: "#666", fontSize: "11px", background: "none", border: "none", cursor: "pointer" }}>Logout</button>
+        <button onClick={() => { setPlayer1(null); setPlayer2(null); }} style={{ marginTop: "20px", color: "#666", fontSize: "11px", background: "none", border: "none", cursor: "pointer" }}>Logout</button>
       </div>
     </div>
   );
