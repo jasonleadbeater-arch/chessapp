@@ -158,6 +158,29 @@ export default function GameBoard({ themeKey }) {
     } finally { setIsJoining(false); }
   };
 
+  // --- THEME MUSIC TRIGGERED ON THEME SELECTION ---
+  useEffect(() => {
+    const startMusic = () => {
+        if (bgMusic.current) bgMusic.current.pause();
+        bgMusic.current = new Audio(`${currentTheme.audioPath}theme.mp3`);
+        bgMusic.current.loop = true;
+        bgMusic.current.volume = 0.3;
+        bgMusic.current.play().catch(() => {
+          console.log("Music waiting for user interaction...");
+        });
+    };
+
+    // Trigger music if audio is unlocked or whenever themeKey changes
+    startMusic();
+    
+    return () => bgMusic.current?.pause();
+  }, [themeKey, audioUnlocked]);
+
+  // Unlock audio globally on first click of the container
+  const handleGlobalClick = () => {
+    if (!audioUnlocked) setAudioUnlocked(true);
+  };
+
   // --- THEME PIECES ---
   const customPieces = useMemo(() => {
     const pieces = ["wP", "wN", "wB", "wR", "wQ", "wK", "bP", "bN", "bB", "bR", "bQ", "bK"];
@@ -175,7 +198,7 @@ export default function GameBoard({ themeKey }) {
   // --- UI: MAIN LOBBY ---
   if (!player1) {
     return (
-      <div style={{ minHeight: "100vh", backgroundColor: "#000", color: "white", padding: "20px", textAlign: "center" }}>
+      <div onClick={handleGlobalClick} style={{ minHeight: "100vh", backgroundColor: "#000", color: "white", padding: "20px", textAlign: "center" }}>
         <h1 style={{ fontSize: "3rem", color: currentTheme.light, letterSpacing: "4px" }}>THE TREASURE CHESS CLUB</h1>
         
         <div style={{ display: "flex", justifyContent: "space-around", alignItems: "center", margin: "40px 0", flexWrap: "wrap" }}>
