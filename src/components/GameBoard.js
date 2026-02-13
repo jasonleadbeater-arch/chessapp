@@ -9,9 +9,10 @@ export default function GameBoard({ themeKey }) {
   const [player1, setPlayer1] = useState(null);
   const [player2, setPlayer2] = useState(null);
   const [gameMode, setGameMode] = useState("ai");
-  const [aiLevel, setAiLevel] = useState(1);
+  const [aiLevel, setAiLevel] = useState(1); // 0-20
   const [inputs, setInputs] = useState({ p1: "", p2: "" });
   const [treasury, setTreasury] = useState([]);
+  const [liveGames, setLiveGames] = useState([]);
   const [game, setGame] = useState(new Chess());
   const [optionSquares, setOptionSquares] = useState({});
   const [audioUnlocked, setAudioUnlocked] = useState(false);
@@ -42,7 +43,7 @@ export default function GameBoard({ themeKey }) {
     return { whiteCaptured, blackCaptured };
   };
 
-  // --- MOVE OPTIONS ---
+  // --- DOTS / LEGAL MOVES ---
   function getMoveOptions(square) {
     const moves = game.moves({ square, verbose: true });
     if (moves.length === 0) return false;
@@ -65,6 +66,8 @@ export default function GameBoard({ themeKey }) {
   const fetchData = async () => {
     const { data: m } = await supabase.from('treasury').select('*').order('coins', { ascending: false });
     if (m) setTreasury(m);
+    const { data: g } = await supabase.from('games').select('*').limit(10);
+    if (g) setLiveGames(g);
   };
   useEffect(() => { fetchData(); }, []);
 
@@ -81,69 +84,69 @@ export default function GameBoard({ themeKey }) {
     audio.play().catch(e => console.log("Sound error:", e));
   };
 
-  // --- STOCKFISH INITIALIZATION ---
+  // --- UPDATED STOCKFISH ENGINE LOGIC ---
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      stockfish.current = new Worker('/stockfish.js');
-      
-      stockfish.current.onmessage = (e) => {
-        console.log("Stockfish Says:", e.data); // DEBUG LOG
-        if (e.data.startsWith("bestmove") && gameMode === "ai") {
-          const moveStr = e.data.split(" ")[1];
-          if (!moveStr || moveStr === "(none)") return;
+    stockfish.current = new Worker('/stockfish.js');
 
-          const next = new Chess(game.fen());
-          try {
-            const m = next.move({ 
-              from: moveStr.substring(0, 2), 
-              to: moveStr.substring(2, 4), 
-              promotion: "q" 
-            });
-            if (m) {
-              setGame(next);
-              playSound(m.captured ? "black_capture.mp3" : "move.mp3");
-              checkGameOver(next);
-            }
-          } catch (err) { console.error("AI Move Logic Error:", err); }
+    stockfish.current.onmessage = (e) => {
+      if (e.data.startsWith("bestmove") && gameMode === "ai") {
+        const moveStr = e.data.split(" ")[1];
+        if (!moveStr || moveStr === "(none)") return;
+
+        const next = new Chess(game.fen());
+        try {
+          const m = next.move({ 
+            from: moveStr.substring(0, 2), 
+            to: moveStr.substring(2, 4), 
+            promotion: "q" 
+          });
+          
+          if (m) {
+            setGame(next);
+            if (m.captured) playSound("black_capture.mp3");
+            else playSound("move.mp3");
+            checkGameOver(next);
+          }
+        } catch (err) {
+          console.error("AI Move Error:", err);
         }
-      };
+      }
+    };
 
-      stockfish.current.postMessage("uci");
-      stockfish.current.postMessage(`setoption name Skill Level value ${aiLevel}`);
-      stockfish.current.postMessage("isready");
-    }
+    stockfish.current.postMessage("uci");
+    stockfish.current.postMessage("ucinewgame");
+    stockfish.current.postMessage(`setoption name Skill Level value ${aiLevel}`);
+    stockfish.current.postMessage("isready");
+    
     return () => stockfish.current?.terminate();
   }, [gameMode, player1, aiLevel]);
 
-  // --- TRIGGER AI MOVE ---
   useEffect(() => {
     if (gameMode === "ai" && game.turn() === 'b' && !game.isGameOver() && player1) {
       const timer = setTimeout(() => {
-        // The Reset Sequence
-        stockfish.current?.postMessage("ucinewgame");
-        stockfish.current?.postMessage("isready");
         stockfish.current?.postMessage(`position fen ${game.fen()}`);
-        
-        // Dynamic Depth
-        const depth = aiLevel < 5 ? 2 : aiLevel < 12 ? 8 : 14;
+        const depth = aiLevel < 5 ? 2 : aiLevel < 12 ? 8 : 13;
         stockfish.current?.postMessage(`go depth ${depth}`);
-      }, 600);
+      }, 500);
+      
       return () => clearTimeout(timer);
     }
   }, [game]);
 
   const checkGameOver = async (gameInstance) => {
     if (!gameInstance.isGameOver() || gameOverMessage) return;
-    let msg = gameInstance.isCheckmate() 
-      ? `${gameInstance.turn() === 'w' ? player2?.username : player1?.username} Wins! (+3 🪙)`
-      : "Draw! (+1 🪙)";
-    
-    setGameOverMessage(msg);
+    let msg = "";
     if (gameInstance.isCheckmate()) {
-      const winner = gameInstance.turn() === 'w' ? player2?.username : player1?.username;
-      const loser = gameInstance.turn() === 'w' ? player1?.username : player2?.username;
-      await updateCoins(winner, 3); await updateCoins(loser, -3);
+      const winnerColor = gameInstance.turn() === 'w' ? 'b' : 'w';
+      const winName = winnerColor === 'w' ? player1?.username : player2?.username;
+      const loseName = winnerColor === 'w' ? player2?.username : player1?.username;
+      msg = `${winName} Wins! (+3 🪙)`;
+      await updateCoins(winName, 3); await updateCoins(loseName, -3);
+    } else {
+      msg = "Draw! (+1 🪙)";
+      await updateCoins(player1?.username, 1); await updateCoins(player2?.username, 1);
     }
+    setGameOverMessage(msg);
   };
 
   // --- HANDLERS ---
@@ -155,38 +158,53 @@ export default function GameBoard({ themeKey }) {
       setGame(gameCopy);
       setOptionSquares({});
       playSound(move.captured ? "white_capture.mp3" : "move.mp3");
+      if (gameMode === "pvp") {
+        await supabase.from('games').update({ fen: gameCopy.fen() })
+          .or(`and(white_player.eq.${player1.username},black_player.eq.${player2?.username}),and(white_player.eq.${player2?.username},black_player.eq.${player1.username})`);
+      }
       checkGameOver(gameCopy);
       return true;
     } catch (e) { return false; }
   }
 
-  const handleStartGame = async (e) => {
+  const handleStartGame = async (e, existingOpponent = null) => {
     if (e) e.preventDefault();
     setAudioUnlocked(true); 
     const p1 = inputs.p1.toLowerCase().trim();
+    const p2 = (existingOpponent || inputs.p2 || "").toLowerCase().trim();
     if (!p1) return;
     setIsJoining(true);
-    let { data: u1 } = await supabase.from('treasury').select('*').eq('username', p1).maybeSingle();
-    if (!u1) {
-      const { data: n1 } = await supabase.from('treasury').insert([{ username: p1, coins: 50 }]).select().single();
-      u1 = n1;
-    }
-    setPlayer1(u1);
-    setPlayer2({ username: gameMode === "ai" ? "Stockfish AI" : inputs.p2 || "Player 2" });
-    setIsJoining(false);
+    try {
+      let { data: u1 } = await supabase.from('treasury').select('*').eq('username', p1).maybeSingle();
+      if (!u1) {
+        const { data: n1 } = await supabase.from('treasury').insert([{ username: p1, coins: 50 }]).select().single();
+        u1 = n1;
+      }
+      setPlayer1(u1);
+      if (gameMode === "pvp" && p2) {
+        let { data: g } = await supabase.from('games').select('*').or(`and(white_player.eq.${p1},black_player.eq.${p2}),and(white_player.eq.${p2},black_player.eq.${p1})`).maybeSingle();
+        if (g) setGame(new Chess(g.fen));
+        else await supabase.from('games').insert([{ white_player: p1, black_player: p2, fen: new Chess().fen() }]);
+        setPlayer2({ username: p2 });
+      } else { setPlayer2({ username: "Stockfish AI" }); }
+    } finally { setIsJoining(false); }
   };
 
+  // --- THEME MUSIC ---
   useEffect(() => {
     if (!audioUnlocked) return;
+    if (bgMusic.current) { bgMusic.current.pause(); bgMusic.current.src = ""; }
     const musicPath = `${currentTheme.audioPath}theme.mp3`;
-    if (bgMusic.current) bgMusic.current.pause();
     bgMusic.current = new Audio(musicPath);
     bgMusic.current.loop = true;
-    bgMusic.current.volume = 0.2;
+    bgMusic.current.volume = 0.3;
     bgMusic.current.play().catch(() => {});
-    return () => bgMusic.current?.pause();
+    return () => { if (bgMusic.current) bgMusic.current.pause(); };
   }, [themeKey, audioUnlocked]);
 
+  const unlockAudio = () => { if (!audioUnlocked) setAudioUnlocked(true); };
+
+  // --- THEME PIECES ---
   const customPieces = useMemo(() => {
     const pieces = ["wP", "wN", "wB", "wR", "wQ", "wK", "bP", "bN", "bB", "bR", "bQ", "bK"];
     const pieceMap = {};
@@ -200,61 +218,102 @@ export default function GameBoard({ themeKey }) {
 
   const { whiteCaptured, blackCaptured } = getCapturedPieces();
 
-  // --- UI: LOBBY ---
+  // --- UI: MAIN LOBBY ---
   if (!player1) {
     return (
-      <div onClick={() => setAudioUnlocked(true)} style={{ minHeight: "100vh", backgroundColor: "#000", color: "white", padding: "20px", textAlign: "center" }}>
-        <h1 style={{ fontSize: "3rem", color: currentTheme.light }}>THE TREASURE CHESS CLUB</h1>
-        <div style={{ display: "flex", justifyContent: "space-around", alignItems: "center", margin: "40px 0" }}>
-          <img src="/themes/mickey/pieces/wk.png" style={{ width: "120px" }} alt="Mickey" />
-          <div style={{ padding: "30px", backgroundColor: "#111", borderRadius: "20px", border: `4px solid ${currentTheme.light}`, width: "400px" }}>
+      <div onClick={unlockAudio} style={{ minHeight: "100vh", backgroundColor: "#000", color: "white", padding: "20px", textAlign: "center" }}>
+        <h1 style={{ fontSize: "3rem", color: currentTheme.light, letterSpacing: "4px" }}>THE TREASURE CHESS CLUB</h1>
+        
+        <div style={{ display: "flex", justifyContent: "space-around", alignItems: "center", margin: "40px 0", flexWrap: "wrap" }}>
+          <img src="/themes/mickey/pieces/wk.png" style={{ width: "120px", filter: "drop-shadow(0 0 10px gold)" }} alt="Mickey" />
+          
+          <div style={{ padding: "30px", backgroundColor: "#111", borderRadius: "20px", border: `4px solid ${currentTheme.light}`, width: "400px" }} onClick={(e) => e.stopPropagation()}>
              <div style={{ display: "flex", gap: "10px", marginBottom: "20px" }}>
-                <button type="button" onClick={() => setGameMode("ai")} style={{ flex: 1, padding: "10px", backgroundColor: gameMode === "ai" ? currentTheme.light : "#333", color: gameMode === "ai" ? "#000" : "#fff", fontWeight: "bold" }}>VS AI</button>
-                <button type="button" onClick={() => setGameMode("pvp")} style={{ flex: 1, padding: "10px", backgroundColor: gameMode === "pvp" ? currentTheme.light : "#333", color: gameMode === "pvp" ? "#000" : "#fff", fontWeight: "bold" }}>VS PLAYER</button>
+                <button type="button" onClick={() => setGameMode("ai")} style={{ flex: 1, padding: "10px", backgroundColor: gameMode === "ai" ? currentTheme.light : "#333", color: gameMode === "ai" ? "#000" : "#fff", border: "none", cursor: "pointer", fontWeight: "bold" }}>VS AI</button>
+                <button type="button" onClick={() => setGameMode("pvp")} style={{ flex: 1, padding: "10px", backgroundColor: gameMode === "pvp" ? currentTheme.light : "#333", color: gameMode === "pvp" ? "#000" : "#fff", border: "none", cursor: "pointer", fontWeight: "bold" }}>VS PLAYER</button>
              </div>
+
              <form onSubmit={handleStartGame} style={{ display: "flex", flexDirection: "column", gap: "15px" }}>
                 <input placeholder="Your Name" value={inputs.p1} onChange={(e) => setInputs({...inputs, p1: e.target.value})} style={{ padding: "12px", borderRadius: "5px", color: "#000" }} required />
+                {gameMode === "pvp" && <input placeholder="Opponent Name" value={inputs.p2} onChange={(e) => setInputs({...inputs, p2: e.target.value})} style={{ padding: "12px", borderRadius: "5px", color: "#000" }} />}
+                
                 {gameMode === "ai" && (
-                   <div style={{ padding: "10px", background: "#222", borderRadius: "10px" }}>
-                     <label style={{ fontSize: "12px", color: currentTheme.light }}>AI LEVEL: {aiLevel}</label>
-                     <input type="range" min="0" max="20" value={aiLevel} onChange={(e) => setAiLevel(parseInt(e.target.value))} style={{ width: "100%", accentColor: currentTheme.light }} />
+                   <div style={{ padding: "15px", background: "#222", borderRadius: "10px", border: `1px dashed ${currentTheme.light}` }}>
+                     <label style={{ fontSize: "14px", color: currentTheme.light, display: "block", marginBottom: "10px" }}>
+                        STOCKFISH LEVEL: <strong>{aiLevel}</strong>
+                     </label>
+                     <input 
+                       type="range" min="0" max="20" value={aiLevel} 
+                       onChange={(e) => setAiLevel(parseInt(e.target.value))}
+                       style={{ width: "100%", cursor: "pointer", accentColor: currentTheme.light }}
+                     />
                    </div>
                 )}
-                <button type="submit" style={{ padding: "15px", backgroundColor: currentTheme.light, color: "#000", fontWeight: "bold", borderRadius: "5px" }}>ENTER CLUB</button>
+
+                <button type="submit" style={{ padding: "15px", backgroundColor: currentTheme.light, color: "#000", fontWeight: "bold", cursor: "pointer", border: "none", borderRadius: "5px" }}>ENTER CLUB</button>
              </form>
           </div>
-          <img src="/themes/miraculous/pieces/wq.png" style={{ width: "120px" }} alt="Ladybug" />
+
+          <img src="/themes/miraculous/pieces/wq.png" style={{ width: "120px", filter: "drop-shadow(0 0 10px red)" }} alt="Ladybug" />
+        </div>
+
+        <h2 style={{ color: currentTheme.light }}>CLUB MEMBERS</h2>
+        <div style={{ display: "flex", justifyContent: "center", gap: "10px", flexWrap: "wrap", padding: "20px" }}>
+          {treasury.map((u, i) => (
+            <div key={i} style={{ padding: "8px 15px", background: "#222", borderRadius: "20px", border: `1px solid ${currentTheme.light}` }}>
+              {u.username} <span style={{ color: "gold" }}>🪙 {u.coins}</span>
+            </div>
+          ))}
         </div>
       </div>
     );
   }
 
-  // --- UI: GAME ---
+  // --- UI: GAME BOARD ---
   return (
-    <div style={{ display: "flex", justifyContent: "center", padding: "40px", backgroundColor: "#000", minHeight: "100vh", color: "white" }}>
-      <div style={{ width: "80px", background: "#111", padding: "10px", borderRadius: "10px" }}>
+    <div style={{ display: "flex", justifyContent: "center", alignItems: "flex-start", padding: "40px", backgroundColor: "#000", minHeight: "100vh", color: "white" }}>
+      <div style={{ width: "80px", display: "flex", flexDirection: "column", gap: "5px", alignItems: "center", background: "#111", padding: "10px", borderRadius: "10px" }}>
+        <p style={{ fontSize: "10px", color: "#666" }}>LOST</p>
         {blackCaptured.map((p, i) => <img key={i} src={`${currentTheme.path}w${p.toLowerCase()}.png`} style={{ width: "30px" }} alt="lost" />)}
       </div>
 
       <div style={{ margin: "0 40px", textAlign: "center" }}>
-        <h2 style={{ color: currentTheme.light }}>{player1.username} vs {player2?.username}</h2>
+        <h2 style={{ marginBottom: "5px" }}>{player1.username} VS {player2?.username}</h2>
+        {gameMode === "ai" && <p style={{fontSize: '12px', color: currentTheme.light, marginBottom: '15px'}}>AI LEVEL: {aiLevel}</p>}
+        
         {gameOverMessage && (
-          <div style={{ position: "absolute", zIndex: 100, top: "30%", left: "50%", transform: "translateX(-50%)", backgroundColor: "#000", padding: "40px", border: `4px solid ${currentTheme.light}`, borderRadius: "15px" }}>
+          <div style={{ position: "absolute", zIndex: 100, top: "20%", left: "50%", transform: "translateX(-50%)", backgroundColor: "#000", padding: "40px", border: `5px solid ${currentTheme.light}`, borderRadius: "15px" }}>
             <h1>{gameOverMessage}</h1>
-            <button onClick={() => { setGame(new Chess()); setGameOverMessage(null); }} style={{ padding: "10px 20px", backgroundColor: currentTheme.light, fontWeight: "bold" }}>NEW GAME</button>
+            <button onClick={() => { setGame(new Chess()); setGameOverMessage(null); }} style={{ padding: "15px 30px", backgroundColor: currentTheme.light, fontWeight: "bold", border: "none", cursor: "pointer", borderRadius: "5px" }}>NEW GAME</button>
           </div>
         )}
-        <div style={{ width: "550px", border: `12px solid ${currentTheme.dark}` }}>
-          <Chessboard position={game.fen()} onPieceDrop={onDrop} onSquareClick={getMoveOptions} customPieces={customPieces} customDarkSquareStyle={{ backgroundColor: currentTheme.dark }} customLightSquareStyle={{ backgroundColor: currentTheme.light }} />
+
+        <div style={{ width: "min(550px, 90vw)", border: `12px solid ${currentTheme.dark}`, borderRadius: "5px" }}>
+          <Chessboard 
+            position={game.fen()} 
+            onPieceDrop={onDrop} 
+            onSquareClick={(square) => { getMoveOptions(square) || setOptionSquares({}); }}
+            customPieces={customPieces}
+            customSquareStyles={{ ...optionSquares }}
+            customDarkSquareStyle={{ backgroundColor: currentTheme.dark }}
+            customLightSquareStyle={{ backgroundColor: currentTheme.light }}
+          />
         </div>
-        <div style={{ marginTop: "20px" }}>
-          <button onClick={() => window.location.reload()} style={{ padding: "10px 20px", background: "#444", color: "#fff", border: "none", borderRadius: "5px" }}>EXIT CLUB</button>
+
+        <div style={{ marginTop: "20px", display: "flex", gap: "10px", justifyContent: "center" }}>
+          {gameMode === "ai" && <button onClick={() => { game.undo(); game.undo(); setGame(new Chess(game.fen())); }} style={btnStyle}>UNDO</button>}
+          <button onClick={() => { updateCoins(player1.username, 1); updateCoins(player2.username, 1); setGameOverMessage("Draw Agreed!"); }} style={btnStyle}>OFFER DRAW</button>
+          <button onClick={async () => { await updateCoins(player2.username, 3); await updateCoins(player1.username, -3); setGameOverMessage(`${player1.username} Resigned!`); }} style={{ ...btnStyle, backgroundColor: "#600" }}>RESIGN</button>
+          <button onClick={() => window.location.reload()} style={{ ...btnStyle, backgroundColor: "#333" }}>EXIT</button>
         </div>
       </div>
 
-      <div style={{ width: "80px", background: "#111", padding: "10px", borderRadius: "10px" }}>
+      <div style={{ width: "80px", display: "flex", flexDirection: "column", gap: "5px", alignItems: "center", background: "#111", padding: "10px", borderRadius: "10px" }}>
+        <p style={{ fontSize: "10px", color: "#666" }}>LOST</p>
         {whiteCaptured.map((p, i) => <img key={i} src={`${currentTheme.path}b${p.toLowerCase()}.png`} style={{ width: "30px" }} alt="lost" />)}
       </div>
     </div>
   );
 }
+
+const btnStyle = { padding: "10px 20px", backgroundColor: "#444", color: "#fff", border: "none", borderRadius: "5px", cursor: "pointer", fontWeight: "bold", fontSize: "12px" };
