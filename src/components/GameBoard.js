@@ -65,20 +65,38 @@ export default function GameBoard({ themeKey }) {
     setIsJoining(true);
 
     try {
-      // Login/Create Player 1
-      let { data: u1 } = await supabase.from('treasury').select('*').eq('username', inputs.p1).single();
-      if (!u1) {
-        const { data: newUser } = await supabase.from('treasury').insert([{ username: inputs.p1, coins: 50 }]).select().single();
-        u1 = newUser;
-      }
-      setPlayer1(u1);
+      // 1. Fetch Player 1
+      const { data: u1, error: u1Error } = await supabase
+        .from('treasury')
+        .select('*')
+        .eq('username', inputs.p1)
+        .maybeSingle(); // maybeSingle is safer than single()
 
+      if (u1Error) throw new Error("Database error fetching user");
+
+      let activeUser = u1;
+      if (!u1) {
+        // Create user if they don't exist
+        const { data: newUser, error: createError } = await supabase
+          .from('treasury')
+          .insert([{ username: inputs.p1, coins: 50 }])
+          .select()
+          .single();
+        if (createError) throw new Error("Could not create user");
+        activeUser = newUser;
+      }
+      
+      // STOP HERE if we couldn't get a user. This prevents the crash!
+      if (!activeUser) return;
+      setPlayer1(activeUser);
+
+      // 2. PvP Matchmaking
       if (gameMode === "pvp" && inputs.p2) {
-        let { data: existingGame } = await supabase
+        const { data: existingGame } = await supabase
           .from('games')
           .select('*')
           .or(`and(white_player.eq.${inputs.p1},black_player.eq.${inputs.p2}),and(white_player.eq.${inputs.p2},black_player.eq.${inputs.p1})`)
-          .single();
+          .maybeSingle();
 
         if (existingGame) {
           setGame(new Chess(existingGame.fen));
@@ -95,12 +113,12 @@ export default function GameBoard({ themeKey }) {
       }
       fetchTreasury();
     } catch (err) {
-      console.error("Login Error:", err);
+      console.error("Matchmaking failed:", err.message);
+      alert("Connection error. Please check if your Supabase columns are named correctly!");
     } finally {
       setIsJoining(false);
     }
   };
-
   // --- 4. ENGINE (STOCKFISH) ---
   useEffect(() => {
     stockfish.current = new Worker("/stockfish.js");
