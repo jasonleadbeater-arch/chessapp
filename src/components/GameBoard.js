@@ -9,7 +9,7 @@ export default function GameBoard({ themeKey }) {
   const [player1, setPlayer1] = useState(null);
   const [player2, setPlayer2] = useState(null);
   const [gameMode, setGameMode] = useState("ai");
-  const [aiLevel, setAiLevel] = useState(1); // New State: Stockfish Level (0-20)
+  const [aiLevel, setAiLevel] = useState(1); // 0-20
   const [inputs, setInputs] = useState({ p1: "", p2: "" });
   const [treasury, setTreasury] = useState([]);
   const [liveGames, setLiveGames] = useState([]);
@@ -84,6 +84,7 @@ export default function GameBoard({ themeKey }) {
     audio.play().catch(e => console.log("Sound error:", e));
   };
 
+  // STOCKFISH WORKER SETUP
   useEffect(() => {
     stockfish.current = new Worker('/stockfish.js');
     stockfish.current.onmessage = (e) => {
@@ -96,8 +97,8 @@ export default function GameBoard({ themeKey }) {
         checkGameOver(next);
       }
     };
-    // Initialize Stockfish Settings
     stockfish.current.postMessage("uci");
+    // Send skill level immediately
     stockfish.current.postMessage(`setoption name Skill Level value ${aiLevel}`);
     
     return () => stockfish.current?.terminate();
@@ -106,7 +107,9 @@ export default function GameBoard({ themeKey }) {
   useEffect(() => {
     if (gameMode === "ai" && game.turn() === 'b' && !game.isGameOver() && player1) {
       stockfish.current?.postMessage(`position fen ${game.fen()}`);
-      stockfish.current?.postMessage(`go depth ${Math.max(1, Math.floor(aiLevel/2))}`); // Depth scales with level
+      // Depth also influences how "smart" it plays
+      const depth = aiLevel < 5 ? 1 : aiLevel < 10 ? 5 : 12;
+      stockfish.current?.postMessage(`go depth ${depth}`);
     }
   }, [game]);
 
@@ -170,10 +173,7 @@ export default function GameBoard({ themeKey }) {
   // --- THEME MUSIC ---
   useEffect(() => {
     if (!audioUnlocked) return;
-    if (bgMusic.current) {
-        bgMusic.current.pause();
-        bgMusic.current.src = ""; 
-    }
+    if (bgMusic.current) { bgMusic.current.pause(); bgMusic.current.src = ""; }
     const musicPath = `${currentTheme.audioPath}theme.mp3`;
     bgMusic.current = new Audio(musicPath);
     bgMusic.current.loop = true;
@@ -209,29 +209,32 @@ export default function GameBoard({ themeKey }) {
           
           <div style={{ padding: "30px", backgroundColor: "#111", borderRadius: "20px", border: `4px solid ${currentTheme.light}`, width: "400px" }} onClick={(e) => e.stopPropagation()}>
              <div style={{ display: "flex", gap: "10px", marginBottom: "20px" }}>
-                <button onClick={() => setGameMode("ai")} style={{ flex: 1, padding: "10px", backgroundColor: gameMode === "ai" ? currentTheme.light : "#333", border: "none", cursor: "pointer", fontWeight: "bold" }}>VS AI</button>
-                <button onClick={() => setGameMode("pvp")} style={{ flex: 1, padding: "10px", backgroundColor: gameMode === "pvp" ? currentTheme.light : "#333", border: "none", cursor: "pointer", fontWeight: "bold" }}>VS PLAYER</button>
+                <button type="button" onClick={() => setGameMode("ai")} style={{ flex: 1, padding: "10px", backgroundColor: gameMode === "ai" ? currentTheme.light : "#333", color: gameMode === "ai" ? "#000" : "#fff", border: "none", cursor: "pointer", fontWeight: "bold" }}>VS AI</button>
+                <button type="button" onClick={() => setGameMode("pvp")} style={{ flex: 1, padding: "10px", backgroundColor: gameMode === "pvp" ? currentTheme.light : "#333", color: gameMode === "pvp" ? "#000" : "#fff", border: "none", cursor: "pointer", fontWeight: "bold" }}>VS PLAYER</button>
              </div>
-
-             {/* AI LEVEL SELECTOR */}
-             {gameMode === "ai" && (
-               <div style={{ marginBottom: "20px", padding: "10px", background: "#222", borderRadius: "10px" }}>
-                 <p style={{ fontSize: "14px", color: currentTheme.light, marginBottom: "5px" }}>AI DIFFICULTY: {aiLevel}</p>
-                 <input 
-                   type="range" min="0" max="20" value={aiLevel} 
-                   onChange={(e) => setAiLevel(parseInt(e.target.value))}
-                   style={{ width: "100%", accentColor: currentTheme.light }}
-                 />
-                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: "10px", color: "#666" }}>
-                   <span>EASY</span><span>PRO</span><span>MASTER</span>
-                 </div>
-               </div>
-             )}
 
              <form onSubmit={handleStartGame} style={{ display: "flex", flexDirection: "column", gap: "15px" }}>
                 <input placeholder="Your Name" value={inputs.p1} onChange={(e) => setInputs({...inputs, p1: e.target.value})} style={{ padding: "12px", borderRadius: "5px", color: "#000" }} required />
                 {gameMode === "pvp" && <input placeholder="Opponent Name" value={inputs.p2} onChange={(e) => setInputs({...inputs, p2: e.target.value})} style={{ padding: "12px", borderRadius: "5px", color: "#000" }} />}
-                <button type="submit" style={{ padding: "15px", backgroundColor: currentTheme.light, color: "#000", fontWeight: "bold", cursor: "pointer" }}>ENTER CLUB</button>
+                
+                {/* IMPROVED AI LEVEL SELECTOR */}
+                {gameMode === "ai" && (
+                   <div style={{ padding: "15px", background: "#222", borderRadius: "10px", border: `1px dashed ${currentTheme.light}` }}>
+                     <label style={{ fontSize: "14px", color: currentTheme.light, display: "block", marginBottom: "10px" }}>
+                        STOCKFISH LEVEL: <strong>{aiLevel}</strong>
+                     </label>
+                     <input 
+                       type="range" min="0" max="20" value={aiLevel} 
+                       onChange={(e) => setAiLevel(parseInt(e.target.value))}
+                       style={{ width: "100%", cursor: "pointer", accentColor: currentTheme.light }}
+                     />
+                     <div style={{ display: "flex", justifyContent: "space-between", fontSize: "10px", marginTop: "5px", color: "#888" }}>
+                       <span>NOVICE</span><span>PRO</span><span>GRANDMASTER</span>
+                     </div>
+                   </div>
+                )}
+
+                <button type="submit" style={{ padding: "15px", backgroundColor: currentTheme.light, color: "#000", fontWeight: "bold", cursor: "pointer", border: "none", borderRadius: "5px" }}>ENTER CLUB</button>
              </form>
           </div>
 
@@ -253,8 +256,6 @@ export default function GameBoard({ themeKey }) {
   // --- UI: GAME BOARD ---
   return (
     <div style={{ display: "flex", justifyContent: "center", alignItems: "flex-start", padding: "40px", backgroundColor: "#000", minHeight: "100vh", color: "white" }}>
-      
-      {/* LOST BY WHITE */}
       <div style={{ width: "80px", display: "flex", flexDirection: "column", gap: "5px", alignItems: "center", background: "#111", padding: "10px", borderRadius: "10px" }}>
         <p style={{ fontSize: "10px", color: "#666" }}>LOST</p>
         {blackCaptured.map((p, i) => <img key={i} src={`${currentTheme.path}w${p.toLowerCase()}.png`} style={{ width: "30px" }} alt="lost" />)}
@@ -265,9 +266,9 @@ export default function GameBoard({ themeKey }) {
         {gameMode === "ai" && <p style={{fontSize: '12px', color: currentTheme.light, marginBottom: '15px'}}>AI LEVEL: {aiLevel}</p>}
         
         {gameOverMessage && (
-          <div style={{ position: "absolute", zIndex: 100, top: "20%", left: "50%", transform: "translateX(-50%)", backgroundColor: "#000", padding: "40px", border: `5px solid ${currentTheme.light}` }}>
+          <div style={{ position: "absolute", zIndex: 100, top: "20%", left: "50%", transform: "translateX(-50%)", backgroundColor: "#000", padding: "40px", border: `5px solid ${currentTheme.light}`, borderRadius: "15px" }}>
             <h1>{gameOverMessage}</h1>
-            <button onClick={() => { setGame(new Chess()); setGameOverMessage(null); }} style={{ padding: "15px 30px", backgroundColor: currentTheme.light, fontWeight: "bold", border: "none", cursor: "pointer" }}>NEW GAME</button>
+            <button onClick={() => { setGame(new Chess()); setGameOverMessage(null); }} style={{ padding: "15px 30px", backgroundColor: currentTheme.light, fontWeight: "bold", border: "none", cursor: "pointer", borderRadius: "5px" }}>NEW GAME</button>
           </div>
         )}
 
@@ -291,7 +292,6 @@ export default function GameBoard({ themeKey }) {
         </div>
       </div>
 
-      {/* LOST BY BLACK */}
       <div style={{ width: "80px", display: "flex", flexDirection: "column", gap: "5px", alignItems: "center", background: "#111", padding: "10px", borderRadius: "10px" }}>
         <p style={{ fontSize: "10px", color: "#666" }}>LOST</p>
         {whiteCaptured.map((p, i) => <img key={i} src={`${currentTheme.path}b${p.toLowerCase()}.png`} style={{ width: "30px" }} alt="lost" />)}
