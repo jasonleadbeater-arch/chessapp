@@ -84,52 +84,32 @@ export default function GameBoard({ themeKey }) {
     audio.play().catch(e => console.log("Sound error:", e));
   };
 
-  // --- UPDATED STOCKFISH ENGINE LOGIC ---
+  // STOCKFISH WORKER SETUP
   useEffect(() => {
     stockfish.current = new Worker('/stockfish.js');
-
     stockfish.current.onmessage = (e) => {
       if (e.data.startsWith("bestmove") && gameMode === "ai") {
         const moveStr = e.data.split(" ")[1];
-        if (!moveStr || moveStr === "(none)") return;
-
         const next = new Chess(game.fen());
-        try {
-          const m = next.move({ 
-            from: moveStr.substring(0, 2), 
-            to: moveStr.substring(2, 4), 
-            promotion: "q" 
-          });
-          
-          if (m) {
-            setGame(next);
-            if (m.captured) playSound("black_capture.mp3");
-            else playSound("move.mp3");
-            checkGameOver(next);
-          }
-        } catch (err) {
-          console.error("AI Move Error:", err);
-        }
+        const m = next.move({ from: moveStr.substring(0, 2), to: moveStr.substring(2, 4), promotion: "q" });
+        setGame(next);
+        if (m?.captured) playSound("black_capture.mp3");
+        checkGameOver(next);
       }
     };
-
     stockfish.current.postMessage("uci");
-    stockfish.current.postMessage("ucinewgame");
+    // Send skill level immediately
     stockfish.current.postMessage(`setoption name Skill Level value ${aiLevel}`);
-    stockfish.current.postMessage("isready");
     
     return () => stockfish.current?.terminate();
   }, [gameMode, player1, aiLevel]);
 
   useEffect(() => {
     if (gameMode === "ai" && game.turn() === 'b' && !game.isGameOver() && player1) {
-      const timer = setTimeout(() => {
-        stockfish.current?.postMessage(`position fen ${game.fen()}`);
-        const depth = aiLevel < 5 ? 2 : aiLevel < 12 ? 8 : 13;
-        stockfish.current?.postMessage(`go depth ${depth}`);
-      }, 500);
-      
-      return () => clearTimeout(timer);
+      stockfish.current?.postMessage(`position fen ${game.fen()}`);
+      // Depth also influences how "smart" it plays
+      const depth = aiLevel < 5 ? 1 : aiLevel < 10 ? 5 : 12;
+      stockfish.current?.postMessage(`go depth ${depth}`);
     }
   }, [game]);
 
@@ -237,6 +217,7 @@ export default function GameBoard({ themeKey }) {
                 <input placeholder="Your Name" value={inputs.p1} onChange={(e) => setInputs({...inputs, p1: e.target.value})} style={{ padding: "12px", borderRadius: "5px", color: "#000" }} required />
                 {gameMode === "pvp" && <input placeholder="Opponent Name" value={inputs.p2} onChange={(e) => setInputs({...inputs, p2: e.target.value})} style={{ padding: "12px", borderRadius: "5px", color: "#000" }} />}
                 
+                {/* IMPROVED AI LEVEL SELECTOR */}
                 {gameMode === "ai" && (
                    <div style={{ padding: "15px", background: "#222", borderRadius: "10px", border: `1px dashed ${currentTheme.light}` }}>
                      <label style={{ fontSize: "14px", color: currentTheme.light, display: "block", marginBottom: "10px" }}>
@@ -247,6 +228,9 @@ export default function GameBoard({ themeKey }) {
                        onChange={(e) => setAiLevel(parseInt(e.target.value))}
                        style={{ width: "100%", cursor: "pointer", accentColor: currentTheme.light }}
                      />
+                     <div style={{ display: "flex", justifyContent: "space-between", fontSize: "10px", marginTop: "5px", color: "#888" }}>
+                       <span>NOVICE</span><span>PRO</span><span>GRANDMASTER</span>
+                     </div>
                    </div>
                 )}
 
