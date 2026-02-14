@@ -9,6 +9,7 @@ export default function GameBoard({ themeKey }) {
   const [player1, setPlayer1] = useState(null);
   const [player2, setPlayer2] = useState(null);
   const [gameMode, setGameMode] = useState("ai");
+  const [difficulty, setDifficulty] = useState(10); // Added: Difficulty state
   const [inputs, setInputs] = useState({ p1: "", p2: "" });
   const [treasury, setTreasury] = useState([]);
   const [liveGames, setLiveGames] = useState([]);
@@ -83,27 +84,32 @@ export default function GameBoard({ themeKey }) {
     audio.play().catch(e => console.log("Sound error:", e));
   };
 
+  // --- UPDATED ENGINE WORKER SETUP ---
   useEffect(() => {
     stockfish.current = new Worker('/stockfish.js');
     stockfish.current.onmessage = (e) => {
       if (e.data.startsWith("bestmove") && gameMode === "ai") {
         const moveStr = e.data.split(" ")[1];
-        const next = new Chess(game.fen());
-        const m = next.move({ from: moveStr.substring(0, 2), to: moveStr.substring(2, 4), promotion: "q" });
-        setGame(next);
-        if (m?.captured) playSound("black_capture.mp3");
-        checkGameOver(next);
+        setGame((prev) => {
+            const next = new Chess(prev.fen());
+            const m = next.move({ from: moveStr.substring(0, 2), to: moveStr.substring(2, 4), promotion: "q" });
+            if (m?.captured) playSound("black_capture.mp3");
+            checkGameOver(next);
+            return next;
+        });
       }
     };
     return () => stockfish.current?.terminate();
-  }, [gameMode, player1]);
+  }, [gameMode]); 
 
+  // --- UPDATED ENGINE POSITION SENDER ---
   useEffect(() => {
     if (gameMode === "ai" && game.turn() === 'b' && !game.isGameOver() && player1) {
+      stockfish.current?.postMessage(`setoption name Skill Level value ${difficulty}`);
       stockfish.current?.postMessage(`position fen ${game.fen()}`);
-      stockfish.current?.postMessage(`go depth 10`);
+      stockfish.current?.postMessage(`go depth ${Math.max(1, Math.floor(difficulty / 1.5))}`);
     }
-  }, [game]);
+  }, [game, difficulty]);
 
   const checkGameOver = async (gameInstance) => {
     if (!gameInstance.isGameOver() || gameOverMessage) return;
@@ -141,7 +147,7 @@ export default function GameBoard({ themeKey }) {
 
   const handleStartGame = async (e, existingOpponent = null) => {
     if (e) e.preventDefault();
-    setAudioUnlocked(true); // Ensure audio is unlocked on form submit
+    setAudioUnlocked(true); 
     const p1 = inputs.p1.toLowerCase().trim();
     const p2 = (existingOpponent || inputs.p2 || "").toLowerCase().trim();
     if (!p1) return;
@@ -162,39 +168,25 @@ export default function GameBoard({ themeKey }) {
     } finally { setIsJoining(false); }
   };
 
-  // --- THEME MUSIC (FIXED LOGIC) ---
+  // --- THEME MUSIC ---
   useEffect(() => {
     if (!audioUnlocked) return;
-
     if (bgMusic.current) {
         bgMusic.current.pause();
-        bgMusic.current.src = ""; // Clear current source
+        bgMusic.current.src = ""; 
     }
-
     const musicPath = `${currentTheme.audioPath}theme.mp3`;
     bgMusic.current = new Audio(musicPath);
     bgMusic.current.loop = true;
     bgMusic.current.volume = 0.3;
-    
     const playPromise = bgMusic.current.play();
     if (playPromise !== undefined) {
-        playPromise.catch(error => {
-            console.log("Autoplay blocked. User must click first.");
-        });
+        playPromise.catch(error => console.log("Autoplay blocked."));
     }
-
-    return () => {
-        if (bgMusic.current) bgMusic.current.pause();
-    };
+    return () => { if (bgMusic.current) bgMusic.current.pause(); };
   }, [themeKey, audioUnlocked]);
 
-  // Use this to unlock audio the very first time the user interacts with the app
-  const unlockAudio = () => {
-    if (!audioUnlocked) {
-      setAudioUnlocked(true);
-      console.log("Audio Unlocked");
-    }
-  };
+  const unlockAudio = () => { if (!audioUnlocked) setAudioUnlocked(true); };
 
   // --- THEME PIECES ---
   const customPieces = useMemo(() => {
@@ -213,42 +205,38 @@ export default function GameBoard({ themeKey }) {
   // --- UI: MAIN LOBBY ---
   if (!player1) {
     return (
-      <div 
-        onClick={unlockAudio} 
-        style={{ minHeight: "100vh", backgroundColor: "#000", color: "white", padding: "20px", textAlign: "center", cursor: audioUnlocked ? "default" : "pointer" }}
-      >
+      <div onClick={unlockAudio} style={{ minHeight: "100vh", backgroundColor: "#000", color: "white", padding: "20px", textAlign: "center", cursor: audioUnlocked ? "default" : "pointer" }}>
         {!audioUnlocked && <div style={{position: 'absolute', top: 10, width: '100%', fontSize: '12px', color: '#555'}}>Click anywhere to enable theme music 🎵</div>}
-        
         <h1 style={{ fontSize: "3rem", color: currentTheme.light, letterSpacing: "4px" }}>THE TREASURE CHESS CLUB</h1>
-        
         <div style={{ display: "flex", justifyContent: "space-around", alignItems: "center", margin: "40px 0", flexWrap: "wrap" }}>
           <img src="/themes/mickey/pieces/wk.png" style={{ width: "120px", filter: "drop-shadow(0 0 10px gold)" }} alt="Mickey" />
-          
           <div style={{ padding: "30px", backgroundColor: "#111", borderRadius: "20px", border: `4px solid ${currentTheme.light}`, width: "400px" }} onClick={(e) => e.stopPropagation()}>
              <div style={{ display: "flex", gap: "10px", marginBottom: "20px" }}>
                 <button onClick={() => setGameMode("ai")} style={{ flex: 1, padding: "10px", backgroundColor: gameMode === "ai" ? currentTheme.light : "#333", border: "none", cursor: "pointer", fontWeight: "bold" }}>VS AI</button>
                 <button onClick={() => setGameMode("pvp")} style={{ flex: 1, padding: "10px", backgroundColor: gameMode === "pvp" ? currentTheme.light : "#333", border: "none", cursor: "pointer", fontWeight: "bold" }}>VS PLAYER</button>
              </div>
+
+             {/* Difficulty Slider Integrated Here */}
+             {gameMode === "ai" && (
+                <div style={{ marginBottom: "20px", textAlign: "left" }}>
+                    <label style={{ fontSize: "11px", color: currentTheme.light }}>AI LEVEL: {difficulty}</label>
+                    <input 
+                        type="range" min="1" max="20" 
+                        value={difficulty} 
+                        onChange={(e) => setDifficulty(parseInt(e.target.value))} 
+                        style={{ width: "100%", accentColor: currentTheme.light, cursor: "pointer" }} 
+                    />
+                </div>
+             )}
+
              <form onSubmit={handleStartGame} style={{ display: "flex", flexDirection: "column", gap: "15px" }}>
                 <input placeholder="Your Name" value={inputs.p1} onChange={(e) => setInputs({...inputs, p1: e.target.value})} style={{ padding: "12px", borderRadius: "5px", color: "#000" }} required />
                 {gameMode === "pvp" && <input placeholder="Opponent Name" value={inputs.p2} onChange={(e) => setInputs({...inputs, p2: e.target.value})} style={{ padding: "12px", borderRadius: "5px", color: "#000" }} />}
                 <button type="submit" style={{ padding: "15px", backgroundColor: currentTheme.light, color: "#000", fontWeight: "bold", cursor: "pointer" }}>ENTER CLUB</button>
              </form>
-             {gameMode === "pvp" && liveGames.length > 0 && (
-               <div style={{ marginTop: "20px", textAlign: "left" }}>
-                 <p style={{ fontSize: "12px", color: currentTheme.light }}>OR JOIN A LIVE TABLE:</p>
-                 {liveGames.map((g, i) => (
-                   <button key={i} onClick={() => handleStartGame(null, g.white_player === inputs.p1 ? g.black_player : g.white_player)} style={{ width: "100%", padding: "8px", margin: "2px 0", background: "#222", color: "#fff", border: "1px solid #444", cursor: "pointer", fontSize: "11px" }}>
-                     {g.white_player} vs {g.black_player}
-                   </button>
-                 ))}
-               </div>
-             )}
           </div>
-
           <img src="/themes/miraculous/pieces/wq.png" style={{ width: "120px", filter: "drop-shadow(0 0 10px red)" }} alt="Ladybug" />
         </div>
-
         <h2 style={{ color: currentTheme.light }}>CLUB MEMBERS</h2>
         <div style={{ display: "flex", justifyContent: "center", gap: "10px", flexWrap: "wrap", padding: "20px" }}>
           {treasury.map((u, i) => (
@@ -264,23 +252,18 @@ export default function GameBoard({ themeKey }) {
   // --- UI: GAME BOARD ---
   return (
     <div style={{ display: "flex", justifyContent: "center", alignItems: "flex-start", padding: "40px", backgroundColor: "#000", minHeight: "100vh", color: "white" }}>
-      
-      {/* LOST BY WHITE */}
       <div style={{ width: "80px", display: "flex", flexDirection: "column", gap: "5px", alignItems: "center", background: "#111", padding: "10px", borderRadius: "10px" }}>
         <p style={{ fontSize: "10px", color: "#666" }}>LOST</p>
         {blackCaptured.map((p, i) => <img key={i} src={`${currentTheme.path}w${p.toLowerCase()}.png`} style={{ width: "30px" }} alt="lost" />)}
       </div>
-
       <div style={{ margin: "0 40px", textAlign: "center" }}>
         <h2 style={{ marginBottom: "20px" }}>{player1.username} VS {player2?.username}</h2>
-        
         {gameOverMessage && (
           <div style={{ position: "absolute", zIndex: 100, top: "20%", left: "50%", transform: "translateX(-50%)", backgroundColor: "#000", padding: "40px", border: `5px solid ${currentTheme.light}` }}>
             <h1>{gameOverMessage}</h1>
             <button onClick={() => { setGame(new Chess()); setGameOverMessage(null); }} style={{ padding: "15px 30px", backgroundColor: currentTheme.light, fontWeight: "bold", border: "none", cursor: "pointer" }}>NEW GAME</button>
           </div>
         )}
-
         <div style={{ width: "min(550px, 90vw)", border: `12px solid ${currentTheme.dark}`, borderRadius: "5px" }}>
           <Chessboard 
             position={game.fen()} 
@@ -292,7 +275,6 @@ export default function GameBoard({ themeKey }) {
             customLightSquareStyle={{ backgroundColor: currentTheme.light }}
           />
         </div>
-
         <div style={{ marginTop: "20px", display: "flex", gap: "10px", justifyContent: "center" }}>
           {gameMode === "ai" && <button onClick={() => { game.undo(); game.undo(); setGame(new Chess(game.fen())); }} style={btnStyle}>UNDO</button>}
           <button onClick={() => { updateCoins(player1.username, 1); updateCoins(player2.username, 1); setGameOverMessage("Draw Agreed!"); }} style={btnStyle}>OFFER DRAW</button>
@@ -300,8 +282,6 @@ export default function GameBoard({ themeKey }) {
           <button onClick={() => window.location.reload()} style={{ ...btnStyle, backgroundColor: "#333" }}>EXIT</button>
         </div>
       </div>
-
-      {/* LOST BY BLACK */}
       <div style={{ width: "80px", display: "flex", flexDirection: "column", gap: "5px", alignItems: "center", background: "#111", padding: "10px", borderRadius: "10px" }}>
         <p style={{ fontSize: "10px", color: "#666" }}>LOST</p>
         {whiteCaptured.map((p, i) => <img key={i} src={`${currentTheme.path}b${p.toLowerCase()}.png`} style={{ width: "30px" }} alt="lost" />)}
