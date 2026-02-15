@@ -27,8 +27,7 @@ export default function GameBoard({ themeKey }) {
     beast_quest: { name: "Beast Quest", light: "#7cfc00", dark: "#4d3d2b", path: "/themes/beast_quest/pieces/", audioPath: "/themes/beast_quest/sounds/" },
     mickey: { name: "Mickey Mouse Arcade", light: "#ffcc00", dark: "#000000", path: "/themes/mickey/pieces/", audioPath: "/themes/mickey/sounds/" },
     miraculous: { name: "Miraculous Ladybug", light: "#e21b22", dark: "#000000", path: "/themes/miraculous/pieces/", audioPath: "/themes/miraculous/sounds/" },
-    moana: { name: "Moana Ocean Adventure", light: "rgb(96, 255, 5)", dark: "rgb(2, 97, 1)", path: "/themes/moana/pieces/", audioPath: "/themes/moana/sounds/" 
-    }
+    moana: { name: "Moana Ocean Adventure", light: "rgb(96, 255, 5)", dark: "rgb(2, 97, 1)", path: "/themes/moana/pieces/", audioPath: "/themes/moana/sounds/" }
   };
   const currentTheme = themes[themeKey] || themes.mickey;
 
@@ -95,7 +94,7 @@ export default function GameBoard({ themeKey }) {
         setGame((prev) => {
             const next = new Chess(prev.fen());
             const m = next.move({ from: moveStr.substring(0, 2), to: moveStr.substring(2, 4), promotion: "q" });
-            if (m?.captured) playSound("black_capture.mp3");
+            if (m?.captured) playSound("white_capture.mp3"); // AI (Black) captures White piece
             else playSound("move.mp3");
             checkGameOver(next);
             return next;
@@ -139,15 +138,13 @@ export default function GameBoard({ themeKey }) {
       setGame(gameCopy);
       setOptionSquares({});
       
-      // Theme specific sound logic
-      // --- Updated Sound Logic in onDrop ---
-    if (move.captured) {
-      // If White moved ('w'), a Black piece was captured.
-      // If Black moved ('b'), a White piece was captured.
-      playSound(turnBefore === 'w' ? "black_capture.mp3" : "white_capture.mp3");
-    } else {
-      playSound("move.mp3");
-    }
+      // FIXED SOUND LOGIC: 
+      // If White ('w') moves and captures, play black_capture (a black piece was taken).
+      if (move.captured) {
+        playSound(turnBefore === 'w' ? "black_capture.mp3" : "white_capture.mp3");
+      } else {
+        playSound("move.mp3");
+      }
 
       if (gameMode === "pvp") {
         await supabase.from('games').update({ fen: gameCopy.fen() })
@@ -201,6 +198,7 @@ export default function GameBoard({ themeKey }) {
 
   const unlockAudio = () => { if (!audioUnlocked) setAudioUnlocked(true); };
 
+  // FIXED PIECES: Forced to lowercase to match your filenames (wp.png, etc)
   const customPieces = useMemo(() => {
     const pieces = ["wP", "wN", "wB", "wR", "wQ", "wK", "bP", "bN", "bB", "bR", "bQ", "bK"];
     const pieceMap = {};
