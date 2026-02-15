@@ -14,6 +14,7 @@ export default function GameBoard({ themeKey }) {
   const [treasury, setTreasury] = useState([]);
   const [liveGames, setLiveGames] = useState([]);
   const [game, setGame] = useState(new Chess());
+  const [optionSquares, setOptionSquares] = useState({});
   const [audioUnlocked, setAudioUnlocked] = useState(false);
   const [gameOverMessage, setGameOverMessage] = useState(null);
   const [currentGameId, setCurrentGameId] = useState(null);
@@ -28,27 +29,26 @@ export default function GameBoard({ themeKey }) {
   };
   const currentTheme = themes[themeKey] || themes.mickey;
 
-  // --- REALTIME: SYNC CURRENT POSITION ---
+  // --- REALTIME: LISTEN FOR OPPONENT MOVES ---
   useEffect(() => {
-    if (!currentGameId) return;
+    if (currentGameId) {
+      const channel = supabase
+        .channel(`game-${currentGameId}`)
+        .on('postgres_changes', { 
+            event: 'UPDATE', 
+            schema: 'public', 
+            table: 'games',
+            filter: `id=eq.${currentGameId}` 
+        }, (payload) => {
+          if (payload.new.fen !== game.fen()) {
+            setGame(new Chess(payload.new.fen));
+            playSound("move.mp3");
+          }
+        })
+        .subscribe();
 
-    const channel = supabase
-      .channel(`room-${currentGameId}`)
-      .on('postgres_changes', { 
-        event: 'UPDATE', 
-        schema: 'public', 
-        table: 'games',
-        filter: `id=eq.${currentGameId}` 
-      }, (payload) => {
-        // If the FEN in the DB is different than our local board, update it
-        if (payload.new.fen !== game.fen()) {
-          setGame(new Chess(payload.new.fen));
-          playSound("move.mp3");
-        }
-      })
-      .subscribe();
-
-    return () => { supabase.removeChannel(channel); };
+      return () => { supabase.removeChannel(channel); };
+    }
   }, [currentGameId, game]);
 
   // --- DATA FETCHING ---
@@ -61,7 +61,8 @@ export default function GameBoard({ themeKey }) {
 
   useEffect(() => { 
     fetchData();
-    const interval = setInterval(fetchData, 5000); // Faster polling for lobby
+    // Refresh live games list every 10 seconds automatically
+    const interval = setInterval(fetchData, 10000);
     return () => clearInterval(interval);
   }, []);
 
@@ -70,15 +71,38 @@ export default function GameBoard({ themeKey }) {
     new Audio(`${currentTheme.audioPath}${f}`).play().catch(() => {});
   };
 
+  // --- ENGINE SETUP ---
+  useEffect(() => {
+    stockfish.current = new Worker('/stockfish.js');
+    stockfish.current.onmessage = (e) => {
+      if (e.data.startsWith("bestmove") && gameMode === "ai") {
+        const moveStr = e.data.split(" ")[1];
+        setGame((prev) => {
+          const next = new Chess(prev.fen());
+          next.move({ from: moveStr.substring(0, 2), to: moveStr.substring(2, 4), promotion: "q" });
+          return next;
+        });
+      }
+    };
+    return () => stockfish.current?.terminate();
+  }, [gameMode]);
+
+  useEffect(() => {
+    if (gameMode === "ai" && game.turn() === 'b' && !game.isGameOver()) {
+      stockfish.current?.postMessage(`setoption name Skill Level value ${difficulty}`);
+      stockfish.current?.postMessage(`position fen ${game.fen()}`);
+      stockfish.current?.postMessage(`go depth 10`);
+    }
+  }, [game]);
+
   // --- HANDLERS ---
-  const handleStartGame = async (e, selectedGame = null) => {
+  const handleStartGame = async (e, existingGame = null) => {
     if (e) e.preventDefault();
     setAudioUnlocked(true);
-
     const p1Name = inputs.p1.toLowerCase().trim();
     if (!p1Name) return alert("Please enter your name first!");
 
-    // 1. Authenticate User
+    // Ensure user exists in treasury
     let { data: user } = await supabase.from('treasury').select('*').eq('username', p1Name).maybeSingle();
     if (!user) {
       const { data: newUser } = await supabase.from('treasury').insert([{ username: p1Name, coins: 50 }]).select().single();
@@ -86,48 +110,38 @@ export default function GameBoard({ themeKey }) {
     }
     setPlayer1(user);
 
-    // 2. Load Position Logic
-    if (selectedGame) {
-      // JOINING: Update mode and ID first
+    if (existingGame) {
+      // JOINING EXISTING
       setGameMode("pvp");
-      setCurrentGameId(selectedGame.id);
-      
-      // CRITICAL: Initialize the board with the position from the table
-      const loadedGame = new Chess(selectedGame.fen);
-      setGame(loadedGame);
-
-      // Identify opponent
-      const opponent = selectedGame.white_player === p1Name ? selectedGame.black_player : selectedGame.white_player;
-      setPlayer2({ username: opponent });
-
+      setCurrentGameId(existingGame.id);
+      setGame(new Chess(existingGame.fen));
+      const isWhite = existingGame.white_player === p1Name;
+      setPlayer2({ username: isWhite ? existingGame.black_player : existingGame.white_player });
     } else if (gameMode === "pvp") {
-      // NEW PVP GAME
+      // CREATING NEW PVP
       const p2Name = inputs.p2.toLowerCase().trim();
       const { data: newGame } = await supabase.from('games').insert([
         { white_player: p1Name, black_player: p2Name, fen: new Chess().fen() }
       ]).select().single();
-      
       setCurrentGameId(newGame.id);
-      setGame(new Chess());
       setPlayer2({ username: p2Name });
     } else {
       // VS AI
       setPlayer2({ username: "Stockfish AI" });
-      setGame(new Chess());
     }
   };
 
   async function onDrop(source, target) {
     const gameCopy = new Chess(game.fen());
+    
+    // Simple Turn Security: Check if the player's name matches the turn role
     const turn = gameCopy.turn(); // 'w' or 'b'
-
-    // PVP Security: Are you the right player for this turn?
-    if (gameMode === "pvp" && currentGameId) {
+    if (gameMode === "pvp") {
+        // Find current game data to verify roles
         const { data: activeGame } = await supabase.from('games').select('*').eq('id', currentGameId).single();
-        const turnName = turn === 'w' ? activeGame.white_player : activeGame.black_player;
-        
-        if (player1.username !== turnName) {
-            alert(`It is ${turnName}'s turn!`);
+        const authorizedUser = turn === 'w' ? activeGame.white_player : activeGame.black_player;
+        if (player1.username !== authorizedUser) {
+            alert("It's not your turn!");
             return false;
         }
     }
@@ -140,93 +154,86 @@ export default function GameBoard({ themeKey }) {
       playSound(move.captured ? "white_capture.mp3" : "move.mp3");
 
       if (gameMode === "pvp" && currentGameId) {
-        // Push the new position to Supabase immediately
         await supabase.from('games').update({ fen: gameCopy.fen() }).eq('id', currentGameId);
       }
       return true;
     } catch (e) { return false; }
   }
 
-  // --- ENGINE WORKER (Preserved) ---
-  useEffect(() => {
-    stockfish.current = new Worker('/stockfish.js');
-    stockfish.current.onmessage = (e) => {
-      if (e.data.startsWith("bestmove") && gameMode === "ai") {
-        const moveStr = e.data.split(" ")[1];
-        const next = new Chess(game.fen());
-        next.move({ from: moveStr.substring(0, 2), to: moveStr.substring(2, 4), promotion: "q" });
-        setGame(next);
-      }
-    };
-    return () => stockfish.current?.terminate();
-  }, [gameMode, game.fen()]);
-
+  // --- THEME & UI HELPERS (Preserved) ---
   const customPieces = useMemo(() => {
     const pieces = ["wP", "wN", "wB", "wR", "wQ", "wK", "bP", "bN", "bB", "bR", "bQ", "bK"];
     const pieceMap = {};
     pieces.forEach((p) => {
       pieceMap[p] = ({ squareWidth }) => (
-        <img src={`${currentTheme.path}${p.toLowerCase()}.png`} style={{ width: squareWidth }} alt={p} />
+        <img src={`${currentTheme.path}${p.toLowerCase()}.png`} style={{ width: squareWidth, height: squareWidth }} alt={p} />
       );
     });
     return pieceMap;
   }, [currentTheme]);
 
-  // --- UI: LOBBY ---
+  // --- RENDER LOBBY ---
   if (!player1) {
     return (
       <div style={{ minHeight: "100vh", backgroundColor: "#000", color: "white", padding: "40px", textAlign: "center" }}>
-        <h1 style={{ color: currentTheme.light }}>TREASURE CHESS CLUB</h1>
-        <div style={{ display: "flex", justifyContent: "center", gap: "20px", marginTop: "30px" }}>
+        <h1 style={{ color: currentTheme.light, fontSize: "2.5rem" }}>TREASURE CHESS LOBBY</h1>
+        
+        <div style={{ display: "flex", justifyContent: "center", gap: "40px", flexWrap: "wrap", marginTop: "30px" }}>
           
-          <div style={{ width: "350px", padding: "20px", background: "#111", border: `2px solid ${currentTheme.light}`, borderRadius: "10px" }}>
-            <h3>START NEW</h3>
-            <div style={{ marginBottom: "15px" }}>
-              <button onClick={() => setGameMode("ai")} style={{ background: gameMode === "ai" ? currentTheme.light : "#333", width: "50%" }}>AI</button>
-              <button onClick={() => setGameMode("pvp")} style={{ background: gameMode === "pvp" ? currentTheme.light : "#333", width: "50%" }}>PVP</button>
+          {/* LOGIN & START SECTION */}
+          <div style={{ width: "400px", padding: "30px", background: "#111", borderRadius: "15px", border: `2px solid ${currentTheme.light}` }}>
+            <div style={{ display: "flex", gap: "10px", marginBottom: "20px" }}>
+              <button onClick={() => setGameMode("ai")} style={{ flex: 1, padding: "10px", background: gameMode === "ai" ? currentTheme.light : "#333", color: gameMode === "ai" ? "#000" : "#fff" }}>AI MODE</button>
+              <button onClick={() => setGameMode("pvp")} style={{ flex: 1, padding: "10px", background: gameMode === "pvp" ? currentTheme.light : "#333", color: gameMode === "pvp" ? "#000" : "#fff" }}>PVP MODE</button>
             </div>
+
             <form onSubmit={handleStartGame} style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-              <input placeholder="Your Name" value={inputs.p1} onChange={(e) => setInputs({...inputs, p1: e.target.value})} style={{ padding: "10px" }} required />
-              {gameMode === "pvp" && <input placeholder="Opponent Name" value={inputs.p2} onChange={(e) => setInputs({...inputs, p2: e.target.value})} style={{ padding: "10px" }} />}
-              <button type="submit" style={{ background: currentTheme.light, color: "#000", fontWeight: "bold", padding: "10px" }}>GO</button>
+              <input placeholder="Your Username" value={inputs.p1} onChange={(e) => setInputs({...inputs, p1: e.target.value})} style={{ padding: "12px", color: "#000" }} required />
+              {gameMode === "pvp" && <input placeholder="Opponent Username" value={inputs.p2} onChange={(e) => setInputs({...inputs, p2: e.target.value})} style={{ padding: "12px", color: "#000" }} />}
+              <button type="submit" style={{ padding: "15px", background: currentTheme.light, color: "#000", fontWeight: "bold" }}>CREATE NEW GAME</button>
             </form>
           </div>
 
-          <div style={{ width: "450px", background: "#111", padding: "20px", borderRadius: "10px" }}>
-            <h3 style={{ color: currentTheme.light }}>LIVE TABLES</h3>
-            <table style={{ width: "100%", textAlign: "left" }}>
+          {/* LIVE GAMES TABLE */}
+          <div style={{ width: "500px", background: "#111", padding: "20px", borderRadius: "15px", border: "1px solid #333" }}>
+            <h3 style={{ color: currentTheme.light, marginTop: 0 }}>LIVE TABLES</h3>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "14px" }}>
               <thead>
-                <tr style={{ color: "#666", fontSize: "12px" }}>
-                  <th>White</th>
-                  <th>Black</th>
-                  <th>Action</th>
+                <tr style={{ borderBottom: "1px solid #333", color: "#666" }}>
+                  <th style={{ padding: "10px", textAlign: "left" }}>White</th>
+                  <th style={{ padding: "10px", textAlign: "left" }}>Black</th>
+                  <th style={{ padding: "10px", textAlign: "right" }}>Action</th>
                 </tr>
               </thead>
               <tbody>
                 {liveGames.map((g) => (
                   <tr key={g.id} style={{ borderBottom: "1px solid #222" }}>
-                    <td>{g.white_player}</td>
-                    <td>{g.black_player}</td>
-                    <td>
-                      <button onClick={() => handleStartGame(null, g)} style={{ color: currentTheme.light, border: "none", background: "none", cursor: "pointer" }}>
-                        JOIN MATCH
+                    <td style={{ padding: "10px" }}>{g.white_player}</td>
+                    <td style={{ padding: "10px" }}>{g.black_player}</td>
+                    <td style={{ padding: "10px", textAlign: "right" }}>
+                      <button 
+                        onClick={() => handleStartGame(null, g)}
+                        style={{ padding: "5px 15px", background: "transparent", border: `1px solid ${currentTheme.light}`, color: currentTheme.light, cursor: "pointer" }}
+                      >
+                        JOIN
                       </button>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+            {liveGames.length === 0 && <p style={{ color: "#444", marginTop: "20px" }}>No active games found.</p>}
           </div>
         </div>
       </div>
     );
   }
 
-  // --- UI: GAME ---
+  // --- RENDER GAME ---
   return (
-    <div style={{ minHeight: "100vh", backgroundColor: "#000", color: "white", padding: "40px", textAlign: "center" }}>
-      <h2>{player1.username} vs {player2.username}</h2>
-      <div style={{ width: "500px", margin: "0 auto", border: `10px solid ${currentTheme.dark}` }}>
+    <div style={{ minHeight: "100vh", backgroundColor: "#000", color: "white", textAlign: "center", padding: "40px" }}>
+      <h2>{player1.username} (You) vs {player2.username}</h2>
+      <div style={{ width: "550px", margin: "0 auto", border: `10px solid ${currentTheme.dark}` }}>
         <Chessboard 
             position={game.fen()} 
             onPieceDrop={onDrop} 
@@ -235,7 +242,7 @@ export default function GameBoard({ themeKey }) {
             customLightSquareStyle={{ backgroundColor: currentTheme.light }}
         />
       </div>
-      <button onClick={() => window.location.reload()} style={{ marginTop: "20px" }}>EXIT</button>
+      <button onClick={() => window.location.reload()} style={{ marginTop: "30px", padding: "10px 30px", background: "#333", color: "#fff", border: "none" }}>EXIT TO LOBBY</button>
     </div>
   );
 }
