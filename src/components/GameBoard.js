@@ -298,3 +298,5 @@ export default function GameBoard({ themeKey }) {
     </div>
   );
 }
+
+const btnStyle = { padding: "10px 20px", backgroundColor: "#444", color: "#fff", border: "none", borderRadius: "5px", cursor: "pointer", fontWeight: "bold", fontSize: "12px" };
