@@ -19,6 +19,8 @@ export default function ArcadeApp() {
           <option value="mickey">Mickey Mouse</option>
           <option value="miraculous">Miraculous</option>
           <option value="beast_quest">Beast Quest</option>
+          {/* Added Moana Theme Option below */}
+          <option value="moana">Moana Ocean Adventure</option>
         </select>
       </div>
 
