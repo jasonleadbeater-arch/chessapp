@@ -140,11 +140,14 @@ export default function GameBoard({ themeKey }) {
       setOptionSquares({});
       
       // Theme specific sound logic
-      if (move.captured) {
-        playSound(turnBefore === 'w' ? "white_capture.mp3" : "black_capture.mp3");
-      } else {
-        playSound("move.mp3");
-      }
+      // --- Updated Sound Logic in onDrop ---
+    if (move.captured) {
+      // If White moved ('w'), a Black piece was captured.
+      // If Black moved ('b'), a White piece was captured.
+      playSound(turnBefore === 'w' ? "black_capture.mp3" : "white_capture.mp3");
+    } else {
+      playSound("move.mp3");
+    }
 
       if (gameMode === "pvp") {
         await supabase.from('games').update({ fen: gameCopy.fen() })
