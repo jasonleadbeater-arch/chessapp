@@ -73,6 +73,32 @@ export default function GameBoard({ themeKey }) {
   };
   useEffect(() => { fetchData(); }, []);
 
+  // --- NEW: REALTIME SYNC FOR INTERNET PLAY ---
+  useEffect(() => {
+    if (player1 && player2 && gameMode === "pvp") {
+      const channel = supabase
+        .channel('game-updates')
+        .on(
+          'postgres_changes',
+          { 
+            event: 'UPDATE', 
+            schema: 'public', 
+            table: 'games',
+            filter: `white_player=eq.${player1.username},black_player=eq.${player2.username}`
+          },
+          (payload) => {
+            if (payload.new.fen !== game.fen()) {
+              setGame(new Chess(payload.new.fen));
+              playSound("move.mp3"); // Play sound on opponent's move
+            }
+          }
+        )
+        .subscribe();
+
+      return () => supabase.removeChannel(channel);
+    }
+  }, [player1, player2, game]);
+
   const updateCoins = async (u, d) => {
     if (!u || u === "Stockfish AI") return;
     const { data } = await supabase.from('treasury').select('coins').eq('username', u).single();
@@ -94,7 +120,7 @@ export default function GameBoard({ themeKey }) {
         setGame((prev) => {
             const next = new Chess(prev.fen());
             const m = next.move({ from: moveStr.substring(0, 2), to: moveStr.substring(2, 4), promotion: "q" });
-            if (m?.captured) playSound("white_capture.mp3"); // AI (Black) captures White piece
+            if (m?.captured) playSound("white_capture.mp3");
             else playSound("move.mp3");
             checkGameOver(next);
             return next;
@@ -135,11 +161,10 @@ export default function GameBoard({ themeKey }) {
       const turnBefore = gameCopy.turn();
       const move = gameCopy.move({ from: source, to: target, promotion: "q" });
       if (!move) return false;
+      
       setGame(gameCopy);
       setOptionSquares({});
       
-      // FIXED SOUND LOGIC: 
-      // If White ('w') moves and captures, play black_capture (a black piece was taken).
       if (move.captured) {
         playSound(turnBefore === 'w' ? "black_capture.mp3" : "white_capture.mp3");
       } else {
@@ -147,6 +172,7 @@ export default function GameBoard({ themeKey }) {
       }
 
       if (gameMode === "pvp") {
+        // Updated to push moves to Supabase for the other player to see
         await supabase.from('games').update({ fen: gameCopy.fen() })
           .or(`and(white_player.eq.${player1.username},black_player.eq.${player2?.username}),and(white_player.eq.${player2?.username},black_player.eq.${player1.username})`);
       }
@@ -155,6 +181,7 @@ export default function GameBoard({ themeKey }) {
     } catch (e) { return false; }
   }
 
+  // --- UPDATED START LOGIC: RESUMES GAMES OVER THE INTERNET ---
   const handleStartGame = async (e, existingOpponent = null) => {
     if (e) e.preventDefault();
     setAudioUnlocked(true); 
@@ -170,9 +197,13 @@ export default function GameBoard({ themeKey }) {
       }
       setPlayer1(u1);
       if (gameMode === "pvp" && p2) {
+        // Look for existing game to pick up where left off
         let { data: g } = await supabase.from('games').select('*').or(`and(white_player.eq.${p1},black_player.eq.${p2}),and(white_player.eq.${p2},black_player.eq.${p1})`).maybeSingle();
-        if (g) setGame(new Chess(g.fen));
-        else await supabase.from('games').insert([{ white_player: p1, black_player: p2, fen: new Chess().fen() }]);
+        if (g) {
+          setGame(new Chess(g.fen));
+        } else {
+          await supabase.from('games').insert([{ white_player: p1, black_player: p2, fen: new Chess().fen() }]);
+        }
         setPlayer2({ username: p2 });
       } else { setPlayer2({ username: "Stockfish AI" }); }
     } finally { setIsJoining(false); }
@@ -198,7 +229,6 @@ export default function GameBoard({ themeKey }) {
 
   const unlockAudio = () => { if (!audioUnlocked) setAudioUnlocked(true); };
 
-  // FIXED PIECES: Forced to lowercase to match your filenames (wp.png, etc)
   const customPieces = useMemo(() => {
     const pieces = ["wP", "wN", "wB", "wR", "wQ", "wK", "bP", "bN", "bB", "bR", "bQ", "bK"];
     const pieceMap = {};
@@ -221,12 +251,12 @@ export default function GameBoard({ themeKey }) {
         <div style={{ display: "flex", justifyContent: "space-around", alignItems: "center", margin: "40px 0", flexWrap: "wrap" }}>
           <img src="/themes/mickey/pieces/wk.png" style={{ width: "120px", filter: "drop-shadow(0 0 10px gold)" }} alt="Mickey" />
           <div style={{ padding: "30px", backgroundColor: "#111", borderRadius: "20px", border: `4px solid ${currentTheme.light}`, width: "400px" }} onClick={(e) => e.stopPropagation()}>
-             <div style={{ display: "flex", gap: "10px", marginBottom: "20px" }}>
+              <div style={{ display: "flex", gap: "10px", marginBottom: "20px" }}>
                 <button onClick={() => setGameMode("ai")} style={{ flex: 1, padding: "10px", backgroundColor: gameMode === "ai" ? currentTheme.light : "#333", border: "none", cursor: "pointer", fontWeight: "bold" }}>VS AI</button>
                 <button onClick={() => setGameMode("pvp")} style={{ flex: 1, padding: "10px", backgroundColor: gameMode === "pvp" ? currentTheme.light : "#333", border: "none", cursor: "pointer", fontWeight: "bold" }}>VS PLAYER</button>
-             </div>
+              </div>
 
-             {gameMode === "ai" && (
+              {gameMode === "ai" && (
                 <div style={{ marginBottom: "20px", textAlign: "left" }}>
                     <label style={{ fontSize: "11px", color: currentTheme.light }}>AI LEVEL: {difficulty}</label>
                     <input 
@@ -236,21 +266,30 @@ export default function GameBoard({ themeKey }) {
                         style={{ width: "100%", accentColor: currentTheme.light, cursor: "pointer" }} 
                     />
                 </div>
-             )}
+              )}
 
-             <form onSubmit={handleStartGame} style={{ display: "flex", flexDirection: "column", gap: "15px" }}>
+              <form onSubmit={handleStartGame} style={{ display: "flex", flexDirection: "column", gap: "15px" }}>
                 <input placeholder="Your Name" value={inputs.p1} onChange={(e) => setInputs({...inputs, p1: e.target.value})} style={{ padding: "12px", borderRadius: "5px", color: "#000" }} required />
                 {gameMode === "pvp" && <input placeholder="Opponent Name" value={inputs.p2} onChange={(e) => setInputs({...inputs, p2: e.target.value})} style={{ padding: "12px", borderRadius: "5px", color: "#000" }} />}
                 <button type="submit" style={{ padding: "15px", backgroundColor: currentTheme.light, color: "#000", fontWeight: "bold", cursor: "pointer" }}>ENTER CLUB</button>
-             </form>
+              </form>
           </div>
           <img src="/themes/miraculous/pieces/wq.png" style={{ width: "120px", filter: "drop-shadow(0 0 10px red)" }} alt="Ladybug" />
         </div>
         <h2 style={{ color: currentTheme.light }}>CLUB MEMBERS</h2>
         <div style={{ display: "flex", justifyContent: "center", gap: "10px", flexWrap: "wrap", padding: "20px" }}>
           {treasury.map((u, i) => (
-            <div key={i} style={{ padding: "8px 15px", background: "#222", borderRadius: "20px", border: `1px solid ${currentTheme.light}` }}>
+            <div key={i} style={{ padding: "8px 15px", background: "#222", borderRadius: "20px", border: `1px solid ${currentTheme.light}`, display: "flex", alignItems: "center", gap: "10px" }}>
               {u.username} <span style={{ color: "gold" }}>🪙 {u.coins}</span>
+              {/* CHALLENGE BUTTON: Allows selecting player already listed */}
+              {inputs.p1 && u.username.toLowerCase() !== inputs.p1.toLowerCase() && (
+                <button 
+                  onClick={() => handleStartGame(null, u.username)}
+                  style={{ backgroundColor: currentTheme.light, border: "none", padding: "3px 8px", borderRadius: "5px", cursor: "pointer", fontSize: "10px", fontWeight: "bold" }}
+                >
+                  PLAY
+                </button>
+              )}
             </div>
           ))}
         </div>
@@ -282,6 +321,7 @@ export default function GameBoard({ themeKey }) {
             customSquareStyles={{ ...optionSquares }}
             customDarkSquareStyle={{ backgroundColor: currentTheme.dark }}
             customLightSquareStyle={{ backgroundColor: currentTheme.light }}
+            boardOrientation={player1.username.toLowerCase() === player2?.username?.toLowerCase() ? 'white' : (game.turn() === 'b' && gameMode === 'pvp' ? 'black' : 'white')}
           />
         </div>
         <div style={{ marginTop: "20px", display: "flex", gap: "10px", justifyContent: "center" }}>
