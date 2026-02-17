@@ -12,7 +12,7 @@ export default function GameBoard({ themeKey }) {
   const [difficulty, setDifficulty] = useState(10);
   const [inputs, setInputs] = useState({ p1: "", p2: "" });
   const [treasury, setTreasury] = useState([]);
-  const [liveGames, setLiveGames] = useState([]); // Stores existing games from DB
+  const [liveGames, setLiveGames] = useState([]); // NEW: State for the Active Games list
   const [game, setGame] = useState(new Chess());
   const [optionSquares, setOptionSquares] = useState({});
   const [audioUnlocked, setAudioUnlocked] = useState(false);
@@ -33,19 +33,18 @@ export default function GameBoard({ themeKey }) {
 
   // --- DATA FETCHING ---
   const fetchData = async () => {
-    // Fetch members for the club list
+    // Fetch members
     const { data: m } = await supabase.from('treasury').select('*').order('coins', { ascending: false });
     if (m) setTreasury(m);
     
-    // Fetch all active games from the games table
+    // NEW: Fetch active games from the 'games' table
     const { data: g } = await supabase.from('games').select('*').order('created_at', { ascending: false });
     if (g) setLiveGames(g);
   };
 
   useEffect(() => { 
     fetchData(); 
-    // Set up a refresh interval every 10 seconds for the lobby
-    const interval = setInterval(fetchData, 10000);
+    const interval = setInterval(fetchData, 10000); // Auto-refresh lobby every 10s
     return () => clearInterval(interval);
   }, []);
 
@@ -155,7 +154,7 @@ export default function GameBoard({ themeKey }) {
     setGameOverMessage(msg);
   };
 
-  // --- HANDLERS ---
+  // --- HANDLERS (With History Recording) ---
   async function onDrop(source, target) {
     try {
       const gameCopy = new Chess(game.fen());
@@ -192,7 +191,7 @@ export default function GameBoard({ themeKey }) {
     } catch (e) { return false; }
   }
 
-  // JOINING LOGIC FOR ACTIVE GAMES
+  // NEW: Handler for joining an existing game as a specific role
   const handleResumeActiveGame = async (activeGame, role) => {
     setAudioUnlocked(true);
     setGameMode("pvp");
@@ -227,6 +226,7 @@ export default function GameBoard({ themeKey }) {
           setGame(new Chess(g.fen));
         } else {
           await supabase.from('games').insert([{ white_player: p1, black_player: p2, fen: new Chess().fen(), move_history: [] }]);
+          fetchData(); // Update the active games list
         }
         setPlayer2({ username: p2 });
       } else { setPlayer2({ username: "Stockfish AI" }); }
@@ -267,7 +267,7 @@ export default function GameBoard({ themeKey }) {
         <h1 style={{ fontSize: "3rem", color: currentTheme.light, letterSpacing: "4px" }}>THE TREASURE CHESS CLUB</h1>
         
         <div style={{ display: "flex", justifyContent: "center", gap: "40px", flexWrap: "wrap", margin: "40px 0" }}>
-          {/* LOGIN/START SECTION */}
+          {/* LOGIN BOX */}
           <div style={{ padding: "30px", backgroundColor: "#111", borderRadius: "20px", border: `4px solid ${currentTheme.light}`, width: "400px" }}>
               <div style={{ display: "flex", gap: "10px", marginBottom: "20px" }}>
                 <button onClick={() => setGameMode("ai")} style={{ flex: 1, padding: "10px", backgroundColor: gameMode === "ai" ? currentTheme.light : "#333", fontWeight: "bold" }}>VS AI</button>
@@ -280,7 +280,7 @@ export default function GameBoard({ themeKey }) {
               </form>
           </div>
 
-          {/* ACTIVE GAMES SECTION */}
+          {/* ACTIVE GAMES LIST */}
           <div style={{ width: "400px", textAlign: "left" }}>
             <h2 style={{ color: currentTheme.light, borderBottom: `2px solid ${currentTheme.light}` }}>ACTIVE GAMES</h2>
             <div style={{ height: "300px", overflowY: "auto", marginTop: "10px" }}>
@@ -289,8 +289,8 @@ export default function GameBoard({ themeKey }) {
                 <div key={i} style={{ background: "#111", padding: "15px", marginBottom: "10px", borderRadius: "10px", borderLeft: `5px solid ${currentTheme.light}` }}>
                   <p style={{ fontWeight: "bold", marginBottom: "10px" }}>{g.white_player} vs {g.black_player}</p>
                   <div style={{ display: "flex", gap: "10px" }}>
-                    <button onClick={() => handleResumeActiveGame(g, "white")} style={{ padding: "5px 10px", fontSize: "12px", backgroundColor: "#fff", color: "#000" }}>Join as {g.white_player}</button>
-                    <button onClick={() => handleResumeActiveGame(g, "black")} style={{ padding: "5px 10px", fontSize: "12px", backgroundColor: "#444", color: "#fff" }}>Join as {g.black_player}</button>
+                    <button onClick={() => handleResumeActiveGame(g, "white")} style={{ padding: "5px 10px", fontSize: "12px", backgroundColor: "#fff", color: "#000", cursor: "pointer" }}>Join as {g.white_player}</button>
+                    <button onClick={() => handleResumeActiveGame(g, "black")} style={{ padding: "5px 10px", fontSize: "12px", backgroundColor: "#444", color: "#fff", cursor: "pointer" }}>Join as {g.black_player}</button>
                   </div>
                 </div>
               ))}
@@ -310,7 +310,7 @@ export default function GameBoard({ themeKey }) {
     );
   }
 
-  // --- GAME BOARD UI ---
+  // --- GAME UI ---
   return (
     <div style={{ display: "flex", justifyContent: "center", alignItems: "flex-start", padding: "40px", backgroundColor: "#000", minHeight: "100vh", color: "white" }}>
       <div style={{ width: "80px", display: "flex", flexDirection: "column", gap: "5px", alignItems: "center", background: "#111", padding: "10px", borderRadius: "10px" }}>
@@ -329,7 +329,6 @@ export default function GameBoard({ themeKey }) {
             customSquareStyles={{ ...optionSquares }}
             customDarkSquareStyle={{ backgroundColor: currentTheme.dark }}
             customLightSquareStyle={{ backgroundColor: currentTheme.light }}
-            boardOrientation={player1.username === game.get(game.history({verbose: true})?.slice(-1)[0]?.from)?.color === 'w' ? 'white' : 'white' /* logic to orient based on role could go here */}
           />
         </div>
         
@@ -345,7 +344,7 @@ export default function GameBoard({ themeKey }) {
         </div>
 
         <div style={{ marginTop: "20px", display: "flex", gap: "10px", justifyContent: "center" }}>
-          <button onClick={() => window.location.reload()} style={{ padding: "10px 20px", backgroundColor: "#444", border: "none", borderRadius: "5px", color: "white", fontWeight: "bold" }}>EXIT</button>
+          <button onClick={() => window.location.reload()} style={{ padding: "10px 20px", backgroundColor: "#444", border: "none", borderRadius: "5px", color: "white", fontWeight: "bold", cursor: "pointer" }}>EXIT</button>
         </div>
       </div>
 
