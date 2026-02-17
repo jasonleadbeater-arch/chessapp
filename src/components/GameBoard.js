@@ -86,7 +86,7 @@ export default function GameBoard({ themeKey }) {
     audio.play().catch(e => console.log("Sound error:", e));
   };
 
-  // --- STOCKFISH ENGINE REINSTATED ---
+  // --- STOCKFISH ENGINE ---
   useEffect(() => {
     stockfish.current = new Worker('/stockfish.js');
     stockfish.current.onmessage = (e) => {
@@ -105,7 +105,6 @@ export default function GameBoard({ themeKey }) {
     return () => stockfish.current?.terminate();
   }, [gameMode, themeKey]); 
 
-  // Trigger Stockfish when it's black's turn in AI mode
   useEffect(() => {
     if (gameMode === "ai" && game.turn() === "b" && !game.isGameOver()) {
       stockfish.current.postMessage(`position fen ${game.fen()}`);
@@ -239,6 +238,20 @@ export default function GameBoard({ themeKey }) {
               <form onSubmit={handleStartGame} style={{ display: "flex", flexDirection: "column", gap: "15px" }}>
                 <input placeholder="Your Name" value={inputs.p1} onChange={(e) => setInputs({...inputs, p1: e.target.value})} style={{ padding: "12px", borderRadius: "5px" }} required />
                 {gameMode === "pvp" && <input placeholder="Opponent Name" value={inputs.p2} onChange={(e) => setInputs({...inputs, p2: e.target.value})} style={{ padding: "12px", borderRadius: "5px" }} />}
+                
+                {/* NEW: Depth selector added here for VS AI mode */}
+                {gameMode === "ai" && (
+                  <div style={{ textAlign: "left", display: "flex", flexDirection: "column", gap: "5px" }}>
+                    <label style={{ fontSize: "12px", color: currentTheme.light }}>AI DEPTH: {difficulty}</label>
+                    <input 
+                      type="range" min="1" max="20" 
+                      value={difficulty} 
+                      onChange={(e) => setDifficulty(parseInt(e.target.value))} 
+                      style={{ cursor: "pointer" }}
+                    />
+                  </div>
+                )}
+
                 <button type="submit" style={{ padding: "15px", backgroundColor: currentTheme.light, fontWeight: "bold" }}>ENTER CLUB</button>
               </form>
           </div>
