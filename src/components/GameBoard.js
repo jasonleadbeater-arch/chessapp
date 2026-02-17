@@ -32,6 +32,22 @@ export default function GameBoard({ themeKey }) {
   };
   const currentTheme = themes[themeKey] || themes.mickey;
 
+  // --- AUDIO LOGIC ---
+  useEffect(() => {
+    if (audioUnlocked) {
+      if (bgMusic.current) {
+        bgMusic.current.pause();
+      }
+      bgMusic.current = new Audio(`${currentTheme.audioPath}theme.mp3`);
+      bgMusic.current.loop = true;
+      bgMusic.current.volume = 0.3;
+      bgMusic.current.play().catch(e => console.log("Music error:", e));
+    }
+    return () => {
+      if (bgMusic.current) bgMusic.current.pause();
+    };
+  }, [audioUnlocked, themeKey]);
+
   // --- DATA FETCHING ---
   const fetchData = async () => {
     const { data: m } = await supabase.from('treasury').select('*').order('coins', { ascending: false });
@@ -239,7 +255,6 @@ export default function GameBoard({ themeKey }) {
                 <input placeholder="Your Name" value={inputs.p1} onChange={(e) => setInputs({...inputs, p1: e.target.value})} style={{ padding: "12px", borderRadius: "5px" }} required />
                 {gameMode === "pvp" && <input placeholder="Opponent Name" value={inputs.p2} onChange={(e) => setInputs({...inputs, p2: e.target.value})} style={{ padding: "12px", borderRadius: "5px" }} />}
                 
-                {/* NEW: Depth selector added here for VS AI mode */}
                 {gameMode === "ai" && (
                   <div style={{ textAlign: "left", display: "flex", flexDirection: "column", gap: "5px" }}>
                     <label style={{ fontSize: "12px", color: currentTheme.light }}>AI DEPTH: {difficulty}</label>
