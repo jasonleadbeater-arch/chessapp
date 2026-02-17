@@ -73,7 +73,7 @@ export default function GameBoard({ themeKey }) {
   };
   useEffect(() => { fetchData(); }, []);
 
-  // --- NEW: REALTIME SYNC FOR INTERNET PLAY ---
+  // --- REALTIME SYNC ---
   useEffect(() => {
     if (player1 && player2 && gameMode === "pvp") {
       const channel = supabase
@@ -89,7 +89,7 @@ export default function GameBoard({ themeKey }) {
           (payload) => {
             if (payload.new.fen !== game.fen()) {
               setGame(new Chess(payload.new.fen));
-              playSound("move.mp3"); // Play sound on opponent's move
+              playSound("move.mp3");
             }
           }
         )
@@ -154,7 +154,7 @@ export default function GameBoard({ themeKey }) {
     setGameOverMessage(msg);
   };
 
-  // --- HANDLERS ---
+  // --- HANDLERS (Updated with Move History) ---
   async function onDrop(source, target) {
     try {
       const gameCopy = new Chess(game.fen());
@@ -172,16 +172,26 @@ export default function GameBoard({ themeKey }) {
       }
 
       if (gameMode === "pvp") {
-        // Updated to push moves to Supabase for the other player to see
-        await supabase.from('games').update({ fen: gameCopy.fen() })
-          .or(`and(white_player.eq.${player1.username},black_player.eq.${player2?.username}),and(white_player.eq.${player2?.username},black_player.eq.${player1.username})`);
+        // Fetch current history to append the new move
+        const { data: currentData } = await supabase
+          .from('games')
+          .select('move_history')
+          .or(`and(white_player.eq.${player1.username},black_player.eq.${player2.username}),and(white_player.eq.${player2.username},black_player.eq.${player1.username})`)
+          .single();
+
+        const updatedHistory = [...(currentData?.move_history || []), move.san];
+
+        await supabase.from('games').update({ 
+          fen: gameCopy.fen(),
+          move_history: updatedHistory 
+        })
+        .or(`and(white_player.eq.${player1.username},black_player.eq.${player2?.username}),and(white_player.eq.${player2?.username},black_player.eq.${player1.username})`);
       }
       checkGameOver(gameCopy);
       return true;
     } catch (e) { return false; }
   }
 
-  // --- UPDATED START LOGIC: RESUMES GAMES OVER THE INTERNET ---
   const handleStartGame = async (e, existingOpponent = null) => {
     if (e) e.preventDefault();
     setAudioUnlocked(true); 
@@ -197,12 +207,11 @@ export default function GameBoard({ themeKey }) {
       }
       setPlayer1(u1);
       if (gameMode === "pvp" && p2) {
-        // Look for existing game to pick up where left off
         let { data: g } = await supabase.from('games').select('*').or(`and(white_player.eq.${p1},black_player.eq.${p2}),and(white_player.eq.${p2},black_player.eq.${p1})`).maybeSingle();
         if (g) {
           setGame(new Chess(g.fen));
         } else {
-          await supabase.from('games').insert([{ white_player: p1, black_player: p2, fen: new Chess().fen() }]);
+          await supabase.from('games').insert([{ white_player: p1, black_player: p2, fen: new Chess().fen(), move_history: [] }]);
         }
         setPlayer2({ username: p2 });
       } else { setPlayer2({ username: "Stockfish AI" }); }
@@ -242,53 +251,33 @@ export default function GameBoard({ themeKey }) {
 
   const { whiteCaptured, blackCaptured } = getCapturedPieces();
 
-  // --- UI: LOBBY ---
+  // --- LOBBY ---
   if (!player1) {
     return (
       <div onClick={unlockAudio} style={{ minHeight: "100vh", backgroundColor: "#000", color: "white", padding: "20px", textAlign: "center", cursor: audioUnlocked ? "default" : "pointer" }}>
-        {!audioUnlocked && <div style={{position: 'absolute', top: 10, width: '100%', fontSize: '12px', color: '#555'}}>Click anywhere to enable theme music 🎵</div>}
         <h1 style={{ fontSize: "3rem", color: currentTheme.light, letterSpacing: "4px" }}>THE TREASURE CHESS CLUB</h1>
         <div style={{ display: "flex", justifyContent: "space-around", alignItems: "center", margin: "40px 0", flexWrap: "wrap" }}>
-          <img src="/themes/mickey/pieces/wk.png" style={{ width: "120px", filter: "drop-shadow(0 0 10px gold)" }} alt="Mickey" />
+          <img src="/themes/mickey/pieces/wk.png" style={{ width: "120px" }} alt="Mickey" />
           <div style={{ padding: "30px", backgroundColor: "#111", borderRadius: "20px", border: `4px solid ${currentTheme.light}`, width: "400px" }} onClick={(e) => e.stopPropagation()}>
               <div style={{ display: "flex", gap: "10px", marginBottom: "20px" }}>
                 <button onClick={() => setGameMode("ai")} style={{ flex: 1, padding: "10px", backgroundColor: gameMode === "ai" ? currentTheme.light : "#333", border: "none", cursor: "pointer", fontWeight: "bold" }}>VS AI</button>
                 <button onClick={() => setGameMode("pvp")} style={{ flex: 1, padding: "10px", backgroundColor: gameMode === "pvp" ? currentTheme.light : "#333", border: "none", cursor: "pointer", fontWeight: "bold" }}>VS PLAYER</button>
               </div>
-
-              {gameMode === "ai" && (
-                <div style={{ marginBottom: "20px", textAlign: "left" }}>
-                    <label style={{ fontSize: "11px", color: currentTheme.light }}>AI LEVEL: {difficulty}</label>
-                    <input 
-                        type="range" min="1" max="20" 
-                        value={difficulty} 
-                        onChange={(e) => setDifficulty(parseInt(e.target.value))} 
-                        style={{ width: "100%", accentColor: currentTheme.light, cursor: "pointer" }} 
-                    />
-                </div>
-              )}
-
               <form onSubmit={handleStartGame} style={{ display: "flex", flexDirection: "column", gap: "15px" }}>
-                <input placeholder="Your Name" value={inputs.p1} onChange={(e) => setInputs({...inputs, p1: e.target.value})} style={{ padding: "12px", borderRadius: "5px", color: "#000" }} required />
-                {gameMode === "pvp" && <input placeholder="Opponent Name" value={inputs.p2} onChange={(e) => setInputs({...inputs, p2: e.target.value})} style={{ padding: "12px", borderRadius: "5px", color: "#000" }} />}
-                <button type="submit" style={{ padding: "15px", backgroundColor: currentTheme.light, color: "#000", fontWeight: "bold", cursor: "pointer" }}>ENTER CLUB</button>
+                <input placeholder="Your Name" value={inputs.p1} onChange={(e) => setInputs({...inputs, p1: e.target.value})} style={{ padding: "12px", borderRadius: "5px" }} required />
+                {gameMode === "pvp" && <input placeholder="Opponent Name" value={inputs.p2} onChange={(e) => setInputs({...inputs, p2: e.target.value})} style={{ padding: "12px", borderRadius: "5px" }} />}
+                <button type="submit" style={{ padding: "15px", backgroundColor: currentTheme.light, fontWeight: "bold", cursor: "pointer" }}>ENTER CLUB</button>
               </form>
           </div>
-          <img src="/themes/miraculous/pieces/wq.png" style={{ width: "120px", filter: "drop-shadow(0 0 10px red)" }} alt="Ladybug" />
+          <img src="/themes/miraculous/pieces/wq.png" style={{ width: "120px" }} alt="Ladybug" />
         </div>
         <h2 style={{ color: currentTheme.light }}>CLUB MEMBERS</h2>
-        <div style={{ display: "flex", justifyContent: "center", gap: "10px", flexWrap: "wrap", padding: "20px" }}>
+        <div style={{ display: "flex", justifyContent: "center", gap: "10px", flexWrap: "wrap" }}>
           {treasury.map((u, i) => (
             <div key={i} style={{ padding: "8px 15px", background: "#222", borderRadius: "20px", border: `1px solid ${currentTheme.light}`, display: "flex", alignItems: "center", gap: "10px" }}>
               {u.username} <span style={{ color: "gold" }}>🪙 {u.coins}</span>
-              {/* CHALLENGE BUTTON: Allows selecting player already listed */}
               {inputs.p1 && u.username.toLowerCase() !== inputs.p1.toLowerCase() && (
-                <button 
-                  onClick={() => handleStartGame(null, u.username)}
-                  style={{ backgroundColor: currentTheme.light, border: "none", padding: "3px 8px", borderRadius: "5px", cursor: "pointer", fontSize: "10px", fontWeight: "bold" }}
-                >
-                  PLAY
-                </button>
+                <button onClick={() => handleStartGame(null, u.username)} style={{ backgroundColor: currentTheme.light, border: "none", padding: "3px 8px", borderRadius: "5px", cursor: "pointer", fontSize: "10px" }}>PLAY</button>
               )}
             </div>
           ))}
@@ -297,21 +286,17 @@ export default function GameBoard({ themeKey }) {
     );
   }
 
-  // --- UI: GAME BOARD ---
+  // --- GAME BOARD ---
   return (
     <div style={{ display: "flex", justifyContent: "center", alignItems: "flex-start", padding: "40px", backgroundColor: "#000", minHeight: "100vh", color: "white" }}>
+      {/* Captured Pieces White */}
       <div style={{ width: "80px", display: "flex", flexDirection: "column", gap: "5px", alignItems: "center", background: "#111", padding: "10px", borderRadius: "10px" }}>
         <p style={{ fontSize: "10px", color: "#666" }}>LOST</p>
         {blackCaptured.map((p, i) => <img key={i} src={`${currentTheme.path}w${p.toLowerCase()}.png`} style={{ width: "30px" }} alt="lost" />)}
       </div>
+
       <div style={{ margin: "0 40px", textAlign: "center" }}>
         <h2 style={{ marginBottom: "20px" }}>{player1.username} VS {player2?.username}</h2>
-        {gameOverMessage && (
-          <div style={{ position: "absolute", zIndex: 100, top: "20%", left: "50%", transform: "translateX(-50%)", backgroundColor: "#000", padding: "40px", border: `5px solid ${currentTheme.light}` }}>
-            <h1>{gameOverMessage}</h1>
-            <button onClick={() => { setGame(new Chess()); setGameOverMessage(null); }} style={{ padding: "15px 30px", backgroundColor: currentTheme.light, fontWeight: "bold", border: "none", cursor: "pointer" }}>NEW GAME</button>
-          </div>
-        )}
         <div style={{ width: "min(550px, 90vw)", border: `12px solid ${currentTheme.dark}`, borderRadius: "5px" }}>
           <Chessboard 
             position={game.fen()} 
@@ -321,16 +306,27 @@ export default function GameBoard({ themeKey }) {
             customSquareStyles={{ ...optionSquares }}
             customDarkSquareStyle={{ backgroundColor: currentTheme.dark }}
             customLightSquareStyle={{ backgroundColor: currentTheme.light }}
-            boardOrientation={player1.username.toLowerCase() === player2?.username?.toLowerCase() ? 'white' : (game.turn() === 'b' && gameMode === 'pvp' ? 'black' : 'white')}
           />
         </div>
+        
+        {/* NEW: MOVE HISTORY BOX */}
+        <div style={{ marginTop: "20px", height: "100px", overflowY: "auto", background: "#111", padding: "10px", fontSize: "12px", textAlign: "left", border: `1px solid ${currentTheme.dark}`, borderRadius: "5px" }}>
+          <p style={{ color: "#666", marginBottom: "5px" }}>MOVE HISTORY</p>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "10px" }}>
+            {game.history().map((m, i) => (
+              <span key={i} style={{ color: i % 2 === 0 ? "#fff" : currentTheme.light }}>
+                {i % 2 === 0 ? `${Math.floor(i / 2) + 1}. ` : ""}{m}
+              </span>
+            ))}
+          </div>
+        </div>
+
         <div style={{ marginTop: "20px", display: "flex", gap: "10px", justifyContent: "center" }}>
-          {gameMode === "ai" && <button onClick={() => { game.undo(); game.undo(); setGame(new Chess(game.fen())); }} style={btnStyle}>UNDO</button>}
-          <button onClick={() => { updateCoins(player1.username, 1); updateCoins(player2.username, 1); setGameOverMessage("Draw Agreed!"); }} style={btnStyle}>OFFER DRAW</button>
-          <button onClick={async () => { await updateCoins(player2.username, 3); await updateCoins(player1.username, -3); setGameOverMessage(`${player1.username} Resigned!`); }} style={{ ...btnStyle, backgroundColor: "#600" }}>RESIGN</button>
-          <button onClick={() => window.location.reload()} style={{ ...btnStyle, backgroundColor: "#333" }}>EXIT</button>
+          <button onClick={() => window.location.reload()} style={btnStyle}>EXIT</button>
         </div>
       </div>
+
+      {/* Captured Pieces Black */}
       <div style={{ width: "80px", display: "flex", flexDirection: "column", gap: "5px", alignItems: "center", background: "#111", padding: "10px", borderRadius: "10px" }}>
         <p style={{ fontSize: "10px", color: "#666" }}>LOST</p>
         {whiteCaptured.map((p, i) => <img key={i} src={`${currentTheme.path}b${p.toLowerCase()}.png`} style={{ width: "30px" }} alt="lost" />)}
@@ -339,4 +335,4 @@ export default function GameBoard({ themeKey }) {
   );
 }
 
-const btnStyle = { padding: "10px 20px", backgroundColor: "#444", color: "#fff", border: "none", borderRadius: "5px", cursor: "pointer", fontWeight: "bold", fontSize: "12px" };
+const btnStyle = { padding: "10px 20px", backgroundColor: "#444", color: "#fff", border: "none", borderRadius: "5px", cursor: "pointer", fontWeight: "bold" };
