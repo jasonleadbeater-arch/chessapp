@@ -86,6 +86,7 @@ export default function GameBoard({ themeKey }) {
     audio.play().catch(e => console.log("Sound error:", e));
   };
 
+  // --- STOCKFISH ENGINE REINSTATED ---
   useEffect(() => {
     stockfish.current = new Worker('/stockfish.js');
     stockfish.current.onmessage = (e) => {
@@ -103,6 +104,14 @@ export default function GameBoard({ themeKey }) {
     };
     return () => stockfish.current?.terminate();
   }, [gameMode, themeKey]); 
+
+  // Trigger Stockfish when it's black's turn in AI mode
+  useEffect(() => {
+    if (gameMode === "ai" && game.turn() === "b" && !game.isGameOver()) {
+      stockfish.current.postMessage(`position fen ${game.fen()}`);
+      stockfish.current.postMessage(`go depth ${difficulty}`);
+    }
+  }, [game, gameMode, difficulty]);
 
   const checkGameOver = async (gameInstance) => {
     if (!gameInstance.isGameOver() || gameOverMessage) return;
@@ -128,12 +137,11 @@ export default function GameBoard({ themeKey }) {
       const move = gameCopy.move({ from: source, to: target, promotion: "q" });
       if (!move) return false;
       
-      // Capture state before setting state to ensure accuracy
       const newFen = gameCopy.fen();
       const updatedHistory = [...dbHistory, move.san];
       
       setGame(gameCopy);
-      setDbHistory(updatedHistory); // Update local state immediately
+      setDbHistory(updatedHistory); 
       setOptionSquares({});
       
       if (move.captured) {
@@ -143,7 +151,6 @@ export default function GameBoard({ themeKey }) {
       }
 
       if (gameMode === "pvp") {
-        // Updated to update both FEN and move_history in one call
         await supabase.from('games').update({ 
           fen: newFen,
           move_history: updatedHistory 
@@ -159,7 +166,7 @@ export default function GameBoard({ themeKey }) {
     setAudioUnlocked(true);
     setGameMode("pvp");
     setGame(new Chess(activeGame.fen));
-    setDbHistory(activeGame.move_history || []); // LOAD HISTORY FROM DB
+    setDbHistory(activeGame.move_history || []);
     
     if (role === "white") {
       setPlayer1({ username: activeGame.white_player });
@@ -268,7 +275,6 @@ export default function GameBoard({ themeKey }) {
     <div style={{ display: "flex", justifyContent: "center", alignItems: "flex-start", padding: "40px", backgroundColor: "#000", minHeight: "100vh", color: "white" }}>
       <div style={{ width: "80px", textAlign: "center", background: "#111", padding: "10px", borderRadius: "10px" }}>
         <p style={{ fontSize: "10px", color: "#666" }}>LOST</p>
-        {/* Render captured pieces based on board state */}
       </div>
 
       <div style={{ margin: "0 40px", textAlign: "center" }}>
@@ -286,7 +292,6 @@ export default function GameBoard({ themeKey }) {
         <div style={{ marginTop: "20px", height: "100px", overflowY: "auto", background: "#111", padding: "10px", fontSize: "12px", textAlign: "left", border: `1px solid ${currentTheme.dark}` }}>
           <p style={{ color: "#666", marginBottom: "5px" }}>MOVE HISTORY</p>
           <div style={{ display: "flex", flexWrap: "wrap", gap: "10px" }}>
-            {/* USE dbHistory to ensure history is accurate after refreshing */}
             {dbHistory.map((m, i) => (
               <span key={i} style={{ color: i % 2 === 0 ? "#fff" : currentTheme.light }}>
                 {i % 2 === 0 ? `${Math.floor(i / 2) + 1}. ` : ""}{m}
