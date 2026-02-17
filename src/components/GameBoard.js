@@ -60,7 +60,6 @@ export default function GameBoard({ themeKey }) {
             filter: `white_player=eq.${player1.username},black_player=eq.${player2.username}`
           },
           (payload) => {
-            // FIX: Only update if the FEN is actually different to prevent unnecessary re-renders
             if (payload.new.fen !== game.fen()) {
               setGame(new Chess(payload.new.fen));
               setDbHistory(payload.new.move_history || []); // Sync history
@@ -129,9 +128,10 @@ export default function GameBoard({ themeKey }) {
       const move = gameCopy.move({ from: source, to: target, promotion: "q" });
       if (!move) return false;
       
-      const newFen = gameCopy.fen(); // Capture the new position
-      const updatedHistory = [...dbHistory, move.san]; // Capture the new history
-
+      // Capture state before setting state to ensure accuracy
+      const newFen = gameCopy.fen();
+      const updatedHistory = [...dbHistory, move.san];
+      
       setGame(gameCopy);
       setDbHistory(updatedHistory); // Update local state immediately
       setOptionSquares({});
@@ -143,7 +143,7 @@ export default function GameBoard({ themeKey }) {
       }
 
       if (gameMode === "pvp") {
-        // FIX: Ensure both FEN and Move History are sent in the same update call
+        // Updated to update both FEN and move_history in one call
         await supabase.from('games').update({ 
           fen: newFen,
           move_history: updatedHistory 
@@ -196,9 +196,7 @@ export default function GameBoard({ themeKey }) {
           setGame(new Chess(g.fen));
           setDbHistory(g.move_history || []);
         } else {
-          // FIX: Ensure we use a fresh chess instance to get the starting FEN
-          const startFen = new Chess().fen();
-          await supabase.from('games').insert([{ white_player: p1, black_player: p2, fen: startFen, move_history: [] }]);
+          await supabase.from('games').insert([{ white_player: p1, black_player: p2, fen: new Chess().fen(), move_history: [] }]);
           setDbHistory([]);
           fetchData();
         }
