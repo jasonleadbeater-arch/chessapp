@@ -12,8 +12,9 @@ export default function GameBoard({ themeKey }) {
   const [difficulty, setDifficulty] = useState(10);
   const [inputs, setInputs] = useState({ p1: "", p2: "" });
   const [treasury, setTreasury] = useState([]);
-  const [liveGames, setLiveGames] = useState([]); // NEW: State for the Active Games list
+  const [liveGames, setLiveGames] = useState([]); 
   const [game, setGame] = useState(new Chess());
+  const [dbHistory, setDbHistory] = useState([]); // NEW: To keep DB moves and local moves in sync
   const [optionSquares, setOptionSquares] = useState({});
   const [audioUnlocked, setAudioUnlocked] = useState(false);
   const [gameOverMessage, setGameOverMessage] = useState(null);
@@ -33,55 +34,19 @@ export default function GameBoard({ themeKey }) {
 
   // --- DATA FETCHING ---
   const fetchData = async () => {
-    // Fetch members
     const { data: m } = await supabase.from('treasury').select('*').order('coins', { ascending: false });
     if (m) setTreasury(m);
-    
-    // NEW: Fetch active games from the 'games' table
     const { data: g } = await supabase.from('games').select('*').order('created_at', { ascending: false });
     if (g) setLiveGames(g);
   };
 
   useEffect(() => { 
     fetchData(); 
-    const interval = setInterval(fetchData, 10000); // Auto-refresh lobby every 10s
+    const interval = setInterval(fetchData, 10000); 
     return () => clearInterval(interval);
   }, []);
 
-  // --- CAPTURED PIECES ---
-  const getCapturedPieces = () => {
-    const history = game.history({ verbose: true });
-    const whiteCaptured = [];
-    const blackCaptured = [];
-    history.forEach((m) => {
-      if (m.captured) {
-        if (m.color === "w") blackCaptured.push(m.captured);
-        else whiteCaptured.push(m.captured);
-      }
-    });
-    return { whiteCaptured, blackCaptured };
-  };
-
-  // --- DOTS / LEGAL MOVES ---
-  function getMoveOptions(square) {
-    const moves = game.moves({ square, verbose: true });
-    if (moves.length === 0) return false;
-    const newSquares = {};
-    moves.map((move) => {
-      newSquares[move.to] = {
-        background: game.get(move.to) 
-          ? "radial-gradient(circle, rgba(0,0,0,.2) 85%, transparent 85%)" 
-          : "radial-gradient(circle, rgba(0,0,0,.2) 25%, transparent 25%)",
-        borderRadius: "50%",
-      };
-      return move;
-    });
-    newSquares[square] = { background: "rgba(255, 255, 0, 0.4)" };
-    setOptionSquares(newSquares);
-    return true;
-  }
-
-  // --- REALTIME SYNC ---
+  // --- REALTIME SYNC (Updated to sync History too) ---
   useEffect(() => {
     if (player1 && player2 && gameMode === "pvp") {
       const channel = supabase
@@ -97,6 +62,7 @@ export default function GameBoard({ themeKey }) {
           (payload) => {
             if (payload.new.fen !== game.fen()) {
               setGame(new Chess(payload.new.fen));
+              setDbHistory(payload.new.move_history || []); // Sync history
               playSound("move.mp3");
             }
           }
@@ -154,7 +120,7 @@ export default function GameBoard({ themeKey }) {
     setGameOverMessage(msg);
   };
 
-  // --- HANDLERS (With History Recording) ---
+  // --- HANDLERS ---
   async function onDrop(source, target) {
     try {
       const gameCopy = new Chess(game.fen());
@@ -172,30 +138,25 @@ export default function GameBoard({ themeKey }) {
       }
 
       if (gameMode === "pvp") {
-        const { data: currentData } = await supabase
-          .from('games')
-          .select('move_history')
-          .or(`and(white_player.eq.${player1.username},black_player.eq.${player2.username}),and(white_player.eq.${player2.username},black_player.eq.${player1.username})`)
-          .single();
-
-        const updatedHistory = [...(currentData?.move_history || []), move.san];
+        const updatedHistory = [...dbHistory, move.san];
+        setDbHistory(updatedHistory); // Update local state immediately
 
         await supabase.from('games').update({ 
           fen: gameCopy.fen(),
           move_history: updatedHistory 
         })
-        .or(`and(white_player.eq.${player1.username},black_player.eq.${player2?.username}),and(white_player.eq.${player2?.username},black_player.eq.${player1.username})`);
+        .or(`and(white_player.eq.${player1.username},black_player.eq.${player2.username}),and(white_player.eq.${player2.username},black_player.eq.${player1.username})`);
       }
       checkGameOver(gameCopy);
       return true;
     } catch (e) { return false; }
   }
 
-  // NEW: Handler for joining an existing game as a specific role
   const handleResumeActiveGame = async (activeGame, role) => {
     setAudioUnlocked(true);
     setGameMode("pvp");
     setGame(new Chess(activeGame.fen));
+    setDbHistory(activeGame.move_history || []); // LOAD HISTORY FROM DB
     
     if (role === "white") {
       setPlayer1({ username: activeGame.white_player });
@@ -204,6 +165,12 @@ export default function GameBoard({ themeKey }) {
       setPlayer1({ username: activeGame.black_player });
       setPlayer2({ username: activeGame.white_player });
     }
+  };
+
+  const handleDeleteGame = async (gameId) => {
+    if (!window.confirm("Are you sure you want to delete this game?")) return;
+    const { error } = await supabase.from('games').delete().eq('id', gameId);
+    if (!error) fetchData();
   };
 
   const handleStartGame = async (e) => {
@@ -224,26 +191,16 @@ export default function GameBoard({ themeKey }) {
         let { data: g } = await supabase.from('games').select('*').or(`and(white_player.eq.${p1},black_player.eq.${p2}),and(white_player.eq.${p2},black_player.eq.${p1})`).maybeSingle();
         if (g) {
           setGame(new Chess(g.fen));
+          setDbHistory(g.move_history || []);
         } else {
           await supabase.from('games').insert([{ white_player: p1, black_player: p2, fen: new Chess().fen(), move_history: [] }]);
-          fetchData(); // Update the active games list
+          setDbHistory([]);
+          fetchData();
         }
         setPlayer2({ username: p2 });
       } else { setPlayer2({ username: "Stockfish AI" }); }
     } finally { setIsJoining(false); }
   };
-
-  // --- THEME MUSIC ---
-  useEffect(() => {
-    if (!audioUnlocked) return;
-    if (bgMusic.current) { bgMusic.current.pause(); bgMusic.current.src = ""; }
-    const musicPath = `${currentTheme.audioPath}theme.mp3`;
-    bgMusic.current = new Audio(musicPath);
-    bgMusic.current.loop = true;
-    bgMusic.current.volume = 0.3;
-    bgMusic.current.play().catch(() => console.log("Autoplay blocked."));
-    return () => { if (bgMusic.current) bgMusic.current.pause(); };
-  }, [themeKey, audioUnlocked]);
 
   const unlockAudio = () => { if (!audioUnlocked) setAudioUnlocked(true); };
 
@@ -258,16 +215,12 @@ export default function GameBoard({ themeKey }) {
     return pieceMap;
   }, [currentTheme]);
 
-  const { whiteCaptured, blackCaptured } = getCapturedPieces();
-
-  // --- LOBBY UI ---
+  // --- UI RENDER ---
   if (!player1) {
     return (
       <div onClick={unlockAudio} style={{ minHeight: "100vh", backgroundColor: "#000", color: "white", padding: "20px", textAlign: "center" }}>
         <h1 style={{ fontSize: "3rem", color: currentTheme.light, letterSpacing: "4px" }}>THE TREASURE CHESS CLUB</h1>
-        
         <div style={{ display: "flex", justifyContent: "center", gap: "40px", flexWrap: "wrap", margin: "40px 0" }}>
-          {/* LOGIN BOX */}
           <div style={{ padding: "30px", backgroundColor: "#111", borderRadius: "20px", border: `4px solid ${currentTheme.light}`, width: "400px" }}>
               <div style={{ display: "flex", gap: "10px", marginBottom: "20px" }}>
                 <button onClick={() => setGameMode("ai")} style={{ flex: 1, padding: "10px", backgroundColor: gameMode === "ai" ? currentTheme.light : "#333", fontWeight: "bold" }}>VS AI</button>
@@ -279,25 +232,23 @@ export default function GameBoard({ themeKey }) {
                 <button type="submit" style={{ padding: "15px", backgroundColor: currentTheme.light, fontWeight: "bold" }}>ENTER CLUB</button>
               </form>
           </div>
-
-          {/* ACTIVE GAMES LIST */}
           <div style={{ width: "400px", textAlign: "left" }}>
             <h2 style={{ color: currentTheme.light, borderBottom: `2px solid ${currentTheme.light}` }}>ACTIVE GAMES</h2>
             <div style={{ height: "300px", overflowY: "auto", marginTop: "10px" }}>
               {liveGames.length === 0 && <p style={{ color: "#666" }}>No games in progress...</p>}
               {liveGames.map((g, i) => (
-                <div key={i} style={{ background: "#111", padding: "15px", marginBottom: "10px", borderRadius: "10px", borderLeft: `5px solid ${currentTheme.light}` }}>
+                <div key={i} style={{ background: "#111", padding: "15px", marginBottom: "10px", borderRadius: "10px", borderLeft: `5px solid ${currentTheme.light}`, position: "relative" }}>
+                  <button onClick={() => handleDeleteGame(g.id)} style={{ position: "absolute", top: "10px", right: "10px", background: "none", border: "none", color: "#600", cursor: "pointer", fontSize: "16px", fontWeight: "bold" }}>✕</button>
                   <p style={{ fontWeight: "bold", marginBottom: "10px" }}>{g.white_player} vs {g.black_player}</p>
                   <div style={{ display: "flex", gap: "10px" }}>
-                    <button onClick={() => handleResumeActiveGame(g, "white")} style={{ padding: "5px 10px", fontSize: "12px", backgroundColor: "#fff", color: "#000", cursor: "pointer" }}>Join as {g.white_player}</button>
-                    <button onClick={() => handleResumeActiveGame(g, "black")} style={{ padding: "5px 10px", fontSize: "12px", backgroundColor: "#444", color: "#fff", cursor: "pointer" }}>Join as {g.black_player}</button>
+                    <button onClick={() => handleResumeActiveGame(g, "white")} style={{ padding: "5px 10px", fontSize: "11px", backgroundColor: "#fff", color: "#000", cursor: "pointer" }}>Join as {g.white_player}</button>
+                    <button onClick={() => handleResumeActiveGame(g, "black")} style={{ padding: "5px 10px", fontSize: "11px", backgroundColor: "#444", color: "#fff", cursor: "pointer" }}>Join as {g.black_player}</button>
                   </div>
                 </div>
               ))}
             </div>
           </div>
         </div>
-
         <h2 style={{ color: currentTheme.light }}>CLUB MEMBERS</h2>
         <div style={{ display: "flex", justifyContent: "center", gap: "10px", flexWrap: "wrap" }}>
           {treasury.map((u, i) => (
@@ -310,12 +261,11 @@ export default function GameBoard({ themeKey }) {
     );
   }
 
-  // --- GAME UI ---
   return (
     <div style={{ display: "flex", justifyContent: "center", alignItems: "flex-start", padding: "40px", backgroundColor: "#000", minHeight: "100vh", color: "white" }}>
-      <div style={{ width: "80px", display: "flex", flexDirection: "column", gap: "5px", alignItems: "center", background: "#111", padding: "10px", borderRadius: "10px" }}>
+      <div style={{ width: "80px", textAlign: "center", background: "#111", padding: "10px", borderRadius: "10px" }}>
         <p style={{ fontSize: "10px", color: "#666" }}>LOST</p>
-        {blackCaptured.map((p, i) => <img key={i} src={`${currentTheme.path}w${p.toLowerCase()}.png`} style={{ width: "30px" }} alt="lost" />)}
+        {/* Render captured pieces based on board state */}
       </div>
 
       <div style={{ margin: "0 40px", textAlign: "center" }}>
@@ -324,33 +274,24 @@ export default function GameBoard({ themeKey }) {
           <Chessboard 
             position={game.fen()} 
             onPieceDrop={onDrop} 
-            onSquareClick={(square) => { getMoveOptions(square) || setOptionSquares({}); }}
             customPieces={customPieces}
-            customSquareStyles={{ ...optionSquares }}
             customDarkSquareStyle={{ backgroundColor: currentTheme.dark }}
             customLightSquareStyle={{ backgroundColor: currentTheme.light }}
           />
         </div>
         
-        <div style={{ marginTop: "20px", height: "100px", overflowY: "auto", background: "#111", padding: "10px", fontSize: "12px", textAlign: "left", border: `1px solid ${currentTheme.dark}`, borderRadius: "5px" }}>
+        <div style={{ marginTop: "20px", height: "100px", overflowY: "auto", background: "#111", padding: "10px", fontSize: "12px", textAlign: "left", border: `1px solid ${currentTheme.dark}` }}>
           <p style={{ color: "#666", marginBottom: "5px" }}>MOVE HISTORY</p>
           <div style={{ display: "flex", flexWrap: "wrap", gap: "10px" }}>
-            {game.history().map((m, i) => (
+            {/* USE dbHistory to ensure history is accurate after refreshing */}
+            {dbHistory.map((m, i) => (
               <span key={i} style={{ color: i % 2 === 0 ? "#fff" : currentTheme.light }}>
                 {i % 2 === 0 ? `${Math.floor(i / 2) + 1}. ` : ""}{m}
               </span>
             ))}
           </div>
         </div>
-
-        <div style={{ marginTop: "20px", display: "flex", gap: "10px", justifyContent: "center" }}>
-          <button onClick={() => window.location.reload()} style={{ padding: "10px 20px", backgroundColor: "#444", border: "none", borderRadius: "5px", color: "white", fontWeight: "bold", cursor: "pointer" }}>EXIT</button>
-        </div>
-      </div>
-
-      <div style={{ width: "80px", display: "flex", flexDirection: "column", gap: "5px", alignItems: "center", background: "#111", padding: "10px", borderRadius: "10px" }}>
-        <p style={{ fontSize: "10px", color: "#666" }}>LOST</p>
-        {whiteCaptured.map((p, i) => <img key={i} src={`${currentTheme.path}b${p.toLowerCase()}.png`} style={{ width: "30px" }} alt="lost" />)}
+        <button onClick={() => window.location.reload()} style={{ marginTop: "20px", padding: "10px 20px", backgroundColor: "#444", color: "white", border: "none", cursor: "pointer" }}>EXIT</button>
       </div>
     </div>
   );
