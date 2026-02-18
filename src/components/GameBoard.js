@@ -76,13 +76,9 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
   };
 
   async function onDrop(source, target) {
-    // --- PIECE COLOR LOCK ---
-    // If it's PvP, check if the piece color belongs to the player
     if (gameMode === "pvp") {
       const piece = game.get(source);
-      if (piece && piece.color !== assignedRole) {
-        return false; // Prevent move
-      }
+      if (piece && piece.color !== assignedRole) return false;
     }
 
     try {
@@ -118,7 +114,7 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
   const handleResumeActiveGame = async (activeGame, role) => {
     setAudioUnlocked(true);
     setGameMode("pvp");
-    setAssignedRole(role === "white" ? "w" : "b"); // Lock player to 'w' or 'b'
+    setAssignedRole(role === "white" ? "w" : "b");
     setGame(new Chess(activeGame.fen));
     setDbHistory(activeGame.move_history || []);
     
@@ -134,7 +130,7 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
   const handleStartGame = async (e) => {
     if (e) e.preventDefault();
     setAudioUnlocked(true); 
-    setAssignedRole("w"); // Starter is always white
+    setAssignedRole("w");
     const p1 = inputs.p1.toLowerCase().trim();
     const p2 = inputs.p2.toLowerCase().trim();
     if (!p1) return;
@@ -171,7 +167,9 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
     return (
       <div onClick={() => setAudioUnlocked(true)} style={{ minHeight: "100vh", backgroundColor: "#000", color: "white", padding: "20px", textAlign: "center" }}>
         <h1 style={{ fontSize: "3rem", color: currentTheme.light, letterSpacing: "4px" }}>THE TREASURE CHESS CLUB</h1>
+        
         <div style={{ display: "flex", justifyContent: "center", gap: "40px", flexWrap: "wrap", margin: "40px 0" }}>
+          {/* LOGIN BOX */}
           <div style={{ padding: "30px", backgroundColor: "#111", borderRadius: "20px", border: `4px solid ${currentTheme.light}`, width: "400px" }}>
               <div style={{ display: "flex", gap: "10px", marginBottom: "20px" }}>
                 <button onClick={() => setGameMode("ai")} style={{ flex: 1, padding: "10px", backgroundColor: gameMode === "ai" ? currentTheme.light : "#333", fontWeight: "bold" }}>VS AI</button>
@@ -183,6 +181,8 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
                 <button type="submit" style={{ padding: "15px", backgroundColor: currentTheme.light, fontWeight: "bold" }}>ENTER CLUB</button>
               </form>
           </div>
+
+          {/* ACTIVE GAMES */}
           <div style={{ width: "400px", textAlign: "left" }}>
             <h2 style={{ color: currentTheme.light, borderBottom: `2px solid ${currentTheme.light}` }}>ACTIVE GAMES</h2>
             <div style={{ height: "300px", overflowY: "auto", marginTop: "10px" }}>
@@ -198,14 +198,53 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
             </div>
           </div>
         </div>
+
+        {/* CLUBHOUSE TREASURY LIST */}
+        <div style={{ marginTop: "50px", maxWidth: "800px", margin: "50px auto", padding: "20px", background: "#111", borderRadius: "15px", border: `2px solid ${currentTheme.light}` }}>
+          <h2 style={{ color: "gold", marginBottom: "20px" }}>👑 CLUBHOUSE TREASURY 👑</h2>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: "15px" }}>
+            {treasury.map((user, idx) => (
+              <div key={idx} style={{ background: "#222", padding: "10px", borderRadius: "10px", border: "1px solid #444" }}>
+                <div style={{ fontWeight: "bold", color: currentTheme.light }}>{user.username}</div>
+                <div style={{ color: "gold", fontSize: "1.1rem" }}>🪙 {user.coins}</div>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
     );
   }
 
+  // --- GAME BOARD VIEW ---
+  const isMyTurn = game.turn() === assignedRole;
+
   return (
     <div style={{ display: "flex", justifyContent: "center", alignItems: "flex-start", padding: "40px", backgroundColor: "#000", minHeight: "100vh", color: "white" }}>
       <div style={{ margin: "0 40px", textAlign: "center" }}>
-        <h2 style={{ marginBottom: "20px" }}>{player1.username} ({assignedRole === 'w' ? 'White' : 'Black'}) VS {player2?.username}</h2>
+        
+        {/* TURN INDICATOR */}
+        <div style={{ marginBottom: "20px", display: "flex", justifyContent: "center", alignItems: "center", gap: "15px" }}>
+          <div style={{ padding: "10px 20px", borderRadius: "10px", border: `2px solid ${game.turn() === 'w' ? currentTheme.light : "#444"}`, backgroundColor: game.turn() === 'w' ? currentTheme.light : "transparent", color: game.turn() === 'w' ? "#000" : "#fff", fontWeight: "bold" }}>
+            WHITE'S TURN {game.turn() === 'w' && "⚡"}
+          </div>
+          <div style={{ fontSize: "24px" }}>VS</div>
+          <div style={{ padding: "10px 20px", borderRadius: "10px", border: `2px solid ${game.turn() === 'b' ? currentTheme.light : "#444"}`, backgroundColor: game.turn() === 'b' ? currentTheme.light : "transparent", color: game.turn() === 'b' ? "#000" : "#fff", fontWeight: "bold" }}>
+            BLACK'S TURN {game.turn() === 'b' && "⚡"}
+          </div>
+        </div>
+
+        <h2 style={{ marginBottom: "10px" }}>
+          {player1.username} ({assignedRole === 'w' ? 'White' : 'Black'}) 
+          <span style={{ margin: "0 10px", color: currentTheme.light }}>vs</span> 
+          {player2?.username}
+        </h2>
+        
+        {isMyTurn ? (
+          <p style={{ color: currentTheme.light, fontWeight: "bold", marginBottom: "10px" }}>YOUR MOVE!</p>
+        ) : (
+          <p style={{ color: "#666", marginBottom: "10px" }}>WAITING FOR OPPONENT...</p>
+        )}
+
         <div style={{ width: "min(550px, 90vw)", border: `12px solid ${currentTheme.dark}`, borderRadius: "5px" }}>
           <Chessboard 
             position={game.fen()} 
@@ -216,7 +255,7 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
             customLightSquareStyle={{ backgroundColor: currentTheme.light }}
           />
         </div>
-        <button onClick={() => window.location.reload()} style={{ marginTop: "20px", padding: "10px 20px", backgroundColor: "#444", color: "white", border: "none" }}>EXIT</button>
+        <button onClick={() => window.location.reload()} style={{ marginTop: "20px", padding: "10px 20px", backgroundColor: "#444", color: "white", border: "none", borderRadius: "5px", cursor: "pointer" }}>EXIT TO LOBBY</button>
       </div>
     </div>
   );
