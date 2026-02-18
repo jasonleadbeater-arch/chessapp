@@ -49,7 +49,6 @@ export default function ArcadeApp() {
         </div>
       </div>
 
-      {/* Added userRole prop and a setter for when they join a game */}
       <GameBoard themeKey={selectedTheme} assignedRole={userRole} setAssignedRole={setUserRole} />
       
       <div style={{ marginTop: "40px", padding: "20px", borderTop: "2px solid #ddd", display: "flex", flexDirection: "column", alignItems: "center", gap: "10px" }}>
