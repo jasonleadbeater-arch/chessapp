@@ -14,7 +14,7 @@ export default function GameBoard({ themeKey }) {
   const [treasury, setTreasury] = useState([]);
   const [liveGames, setLiveGames] = useState([]); 
   const [game, setGame] = useState(new Chess());
-  const [dbHistory, setDbHistory] = useState([]); // NEW: To keep DB moves and local moves in sync
+  const [dbHistory, setDbHistory] = useState([]);
   const [optionSquares, setOptionSquares] = useState({});
   const [audioUnlocked, setAudioUnlocked] = useState(false);
   const [gameOverMessage, setGameOverMessage] = useState(null);
@@ -62,7 +62,7 @@ export default function GameBoard({ themeKey }) {
     return () => clearInterval(interval);
   }, []);
 
-  // --- REALTIME SYNC (Updated to sync History too) ---
+  // --- REALTIME SYNC ---
   useEffect(() => {
     if (player1 && player2 && gameMode === "pvp") {
       const channel = supabase
@@ -78,7 +78,7 @@ export default function GameBoard({ themeKey }) {
           (payload) => {
             if (payload.new.fen !== game.fen()) {
               setGame(new Chess(payload.new.fen));
-              setDbHistory(payload.new.move_history || []); // Sync history
+              setDbHistory(payload.new.move_history || []);
               playSound("move.mp3");
             }
           }
@@ -168,7 +168,8 @@ export default function GameBoard({ themeKey }) {
       if (gameMode === "pvp") {
         await supabase.from('games').update({ 
           fen: newFen,
-          move_history: updatedHistory 
+          move_history: updatedHistory,
+          turn: gameCopy.turn()
         })
         .or(`and(white_player.eq.${player1.username},black_player.eq.${player2.username}),and(white_player.eq.${player2.username},black_player.eq.${player1.username})`);
       }
@@ -218,7 +219,7 @@ export default function GameBoard({ themeKey }) {
           setGame(new Chess(g.fen));
           setDbHistory(g.move_history || []);
         } else {
-          await supabase.from('games').insert([{ white_player: p1, black_player: p2, fen: new Chess().fen(), move_history: [] }]);
+          await supabase.from('games').insert([{ white_player: p1, black_player: p2, fen: new Chess().fen(), move_history: [], turn: 'w' }]);
           setDbHistory([]);
           fetchData();
         }
@@ -254,7 +255,6 @@ export default function GameBoard({ themeKey }) {
               <form onSubmit={handleStartGame} style={{ display: "flex", flexDirection: "column", gap: "15px" }}>
                 <input placeholder="Your Name" value={inputs.p1} onChange={(e) => setInputs({...inputs, p1: e.target.value})} style={{ padding: "12px", borderRadius: "5px" }} required />
                 {gameMode === "pvp" && <input placeholder="Opponent Name" value={inputs.p2} onChange={(e) => setInputs({...inputs, p2: e.target.value})} style={{ padding: "12px", borderRadius: "5px" }} />}
-                
                 {gameMode === "ai" && (
                   <div style={{ textAlign: "left", display: "flex", flexDirection: "column", gap: "5px" }}>
                     <label style={{ fontSize: "12px", color: currentTheme.light }}>AI DEPTH: {difficulty}</label>
@@ -266,7 +266,6 @@ export default function GameBoard({ themeKey }) {
                     />
                   </div>
                 )}
-
                 <button type="submit" style={{ padding: "15px", backgroundColor: currentTheme.light, fontWeight: "bold" }}>ENTER CLUB</button>
               </form>
           </div>
