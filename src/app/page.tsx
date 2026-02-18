@@ -4,8 +4,8 @@ import GameBoard from "../components/GameBoard";
 
 export default function ArcadeApp() {
   const [selectedTheme, setSelectedTheme] = useState("mickey");
+  const [userRole, setUserRole] = useState("w"); // 'w' for white, 'b' for black
 
-  // Logic to determine which character icon to show based on the dropdown
   const getThemeIcon = () => {
     switch (selectedTheme) {
       case "mickey":
@@ -24,8 +24,6 @@ export default function ArcadeApp() {
       <h1 style={{ fontSize: "3rem", marginBottom: "10px", color: "#333" }}>CHESS ARCADE</h1>
       
       <div style={{ marginBottom: "30px", display: "flex", flexDirection: "column", alignItems: "center", gap: "15px" }}>
-        
-        {/* Character Icon Display */}
         {themeIcon && (
           <div style={{ height: "120px", display: "flex", alignItems: "center", justifyContent: "center" }}>
             <img 
@@ -51,7 +49,8 @@ export default function ArcadeApp() {
         </div>
       </div>
 
-      <GameBoard themeKey={selectedTheme} />
+      {/* Added userRole prop and a setter for when they join a game */}
+      <GameBoard themeKey={selectedTheme} assignedRole={userRole} setAssignedRole={setUserRole} />
       
       <div style={{ marginTop: "40px", padding: "20px", borderTop: "2px solid #ddd", display: "flex", flexDirection: "column", alignItems: "center", gap: "10px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
