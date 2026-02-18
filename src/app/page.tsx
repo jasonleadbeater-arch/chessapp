@@ -21,7 +21,7 @@ export default function ArcadeApp() {
 
   return (
     <main style={{ padding: "40px 20px", textAlign: "center", minHeight: "100vh", backgroundColor: "#f0f0f0" }}>
-      <h1 style={{ fontSize: "3rem", marginBottom: "10px", color: "#333" }}>CHESS ARCADE</h1>
+      {/* "CHESS ARCADE" H1 HAS BEEN REMOVED FROM HERE */}
       
       <div style={{ marginBottom: "30px", display: "flex", flexDirection: "column", alignItems: "center", gap: "15px" }}>
         {themeIcon && (
