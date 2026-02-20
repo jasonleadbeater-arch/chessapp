@@ -66,11 +66,11 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
     if (gameInstance.isGameOver() && !gameOverMessage) {
       let message = "";
       if (gameInstance.isCheckmate()) {
-        const winner = gameInstance.turn() === "w" ? player2?.username : player1?.username;
-        const loser = gameInstance.turn() === "w" ? player1?.username : player2?.username;
-        message = `CHECKMATE! ${winner} wins!`;
-        if (winner) await updateCoins(winner, 3);
-        if (loser) await updateCoins(loser, -3);
+        const winnerName = gameInstance.turn() === "w" ? player2?.username : player1?.username;
+        const loserName = gameInstance.turn() === "w" ? player1?.username : player2?.username;
+        message = `CHECKMATE! ${winnerName} wins!`;
+        if (winnerName) await updateCoins(winnerName, 3);
+        if (loserName) await updateCoins(loserName, -3);
       } else if (gameInstance.isDraw()) {
         message = "DRAW!";
         if (player1) await updateCoins(player1.username, 1);
@@ -288,17 +288,6 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
             </div>
           </div>
         </div>
-        <div style={{ marginTop: "50px", maxWidth: "800px", margin: "50px auto", padding: "20px", background: "#111", borderRadius: "15px", border: `2px solid ${currentTheme.light}` }}>
-          <h2 style={{ color: "gold", marginBottom: "20px" }}>👑 CLUBHOUSE TREASURY 👑</h2>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: "15px" }}>
-            {treasury.map((user, idx) => (
-              <div key={idx} style={{ background: "#222", padding: "10px", borderRadius: "10px", border: "1px solid #444" }}>
-                <div style={{ fontWeight: "bold", color: currentTheme.light }}>{user.username}</div>
-                <div style={{ color: "gold", fontSize: "1.1rem" }}>🪙 {user.coins}</div>
-              </div>
-            ))}
-          </div>
-        </div>
       </div>
     );
   }
@@ -309,9 +298,9 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
     <div style={{ display: "flex", justifyContent: "center", alignItems: "flex-start", padding: "40px", backgroundColor: "#000", minHeight: "100vh", color: "white" }}>
       <div style={{ margin: "0 40px", textAlign: "center" }}>
         {gameOverMessage && (
-          <div style={{ position: "fixed", top: "50%", left: "50%", transform: "translate(-50%, -50%)", backgroundColor: "rgba(0,0,0,0.95)", padding: "40px", border: `5px solid ${currentTheme.light}`, zIndex: 1000, borderRadius: "20px", boxShadow: "0 0 50px rgba(0,0,0,1)" }}>
-            <h1 style={{ color: "gold", fontSize: "2.5rem" }}>{gameOverMessage}</h1>
-            <button onClick={() => window.location.reload()} style={{ padding: "15px 30px", background: currentTheme.light, border: "none", fontWeight: "bold", cursor: "pointer", fontSize: "1.2rem", borderRadius: "10px" }}>RETURN TO LOBBY</button>
+          <div style={{ position: "fixed", top: "50%", left: "50%", transform: "translate(-50%, -50%)", backgroundColor: "rgba(0,0,0,0.95)", padding: "40px", border: `5px solid ${currentTheme.light}`, zIndex: 1000, borderRadius: "20px" }}>
+            <h1 style={{ color: "gold" }}>{gameOverMessage}</h1>
+            <button onClick={() => window.location.reload()} style={{ padding: "10px 20px", background: currentTheme.light, border: "none", fontWeight: "bold", cursor: "pointer" }}>RETURN TO LOBBY</button>
           </div>
         )}
         <div style={{ marginBottom: "20px", display: "flex", justifyContent: "center", alignItems: "center", gap: "15px" }}>
@@ -329,7 +318,6 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
         <h2 style={{ marginBottom: "10px" }}>
           {player1.username} ({assignedRole === 'w' ? 'White' : 'Black'}) <span style={{ margin: "0 10px", color: currentTheme.light }}>vs</span> {player2?.username}
         </h2>
-        <p style={{ color: isMyTurn ? currentTheme.light : "#666", fontWeight: "bold", marginBottom: "10px" }}>{isMyTurn ? "YOUR MOVE!" : "WAITING FOR OPPONENT..."}</p>
         <div style={{ width: "min(550px, 90vw)", border: `12px solid ${currentTheme.dark}`, borderRadius: "5px" }}>
           <Chessboard 
             position={game.fen()} 
