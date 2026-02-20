@@ -17,7 +17,6 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
   const [audioUnlocked, setAudioUnlocked] = useState(false);
   const [gameOverMessage, setGameOverMessage] = useState(null);
   const [isJoining, setIsJoining] = useState(false);
-  // State for move indicators
   const [optionSquares, setOptionSquares] = useState({});
 
   const bgMusic = useRef(null);
@@ -55,6 +54,35 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
     return () => clearInterval(interval);
   }, []);
 
+  const updateCoins = async (username, amount) => {
+    if (!username || username === "Stockfish AI") return;
+    const { data } = await supabase.from('treasury').select('coins').eq('username', username).single();
+    if (data) {
+      await supabase.from('treasury').update({ coins: data.coins + amount }).eq('username', username);
+    }
+  };
+
+  const checkGameOver = async (gameInstance) => {
+    if (gameInstance.isGameOver() && !gameOverMessage) {
+      let message = "";
+      if (gameInstance.isCheckmate()) {
+        const winner = gameInstance.turn() === "w" ? player2?.username : player1?.username;
+        const loser = gameInstance.turn() === "w" ? player1?.username : player2?.username;
+        message = `CHECKMATE! ${winner} wins!`;
+        if (winner) await updateCoins(winner, 3);
+        if (loser) await updateCoins(loser, -3);
+      } else if (gameInstance.isDraw()) {
+        message = "DRAW!";
+        if (player1) await updateCoins(player1.username, 1);
+        if (player2) await updateCoins(player2.username, 1);
+      } else {
+        message = "GAME OVER";
+      }
+      setGameOverMessage(message);
+      fetchData();
+    }
+  };
+
   useEffect(() => {
     if (player1 && player2 && gameMode === "pvp") {
       const channel = supabase
@@ -79,36 +107,6 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
     audio.play().catch(e => console.log("Sound error:", e));
   };
 
-  const updateCoins = async (username, amount) => {
-    if (!username || username === "Stockfish AI") return;
-    const { data } = await supabase.from('treasury').select('coins').eq('username', username).single();
-    if (data) {
-      await supabase.from('treasury').update({ coins: data.coins + amount }).eq('username', username);
-    }
-  };
-
-  const checkGameOver = async (gameInstance) => {
-    if (gameInstance.isGameOver() && !gameOverMessage) {
-      let message = "";
-      if (gameInstance.isCheckmate()) {
-        const winner = gameInstance.turn() === "w" ? player2.username : player1.username;
-        const loser = gameInstance.turn() === "w" ? player1.username : player2.username;
-        message = `CHECKMATE! ${winner} wins!`;
-        await updateCoins(winner, 3);
-        await updateCoins(loser, -3);
-      } else if (gameInstance.isDraw()) {
-        message = "DRAW!";
-        await updateCoins(player1.username, 1);
-        await updateCoins(player2.username, 1);
-      } else {
-        message = "GAME OVER";
-      }
-      setGameOverMessage(message);
-      fetchData();
-    }
-  };
-
-  // --- STOCKFISH ENGINE LOGIC ---
   useEffect(() => {
     stockfish.current = new Worker('/stockfish.js');
     stockfish.current.onmessage = (e) => {
@@ -134,7 +132,6 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
     }
   }, [game, gameMode, difficulty]);
 
-  // --- LEGAL MOVE INDICATORS ---
   function getMoveOptions(square) {
     const moves = game.moves({ square, verbose: true });
     if (moves.length === 0) {
@@ -258,7 +255,6 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
     return (
       <div onClick={() => setAudioUnlocked(true)} style={{ minHeight: "100vh", backgroundColor: "#000", color: "white", padding: "20px", textAlign: "center" }}>
         <h1 style={{ fontSize: "3rem", color: currentTheme.light, letterSpacing: "4px" }}>THE TREASURE CHESS CLUB</h1>
-        
         <div style={{ display: "flex", justifyContent: "center", gap: "40px", flexWrap: "wrap", margin: "40px 0" }}>
           <div style={{ padding: "30px", backgroundColor: "#111", borderRadius: "20px", border: `4px solid ${currentTheme.light}`, width: "400px" }}>
               <div style={{ display: "flex", gap: "10px", marginBottom: "20px" }}>
@@ -268,23 +264,15 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
               <form onSubmit={handleStartGame} style={{ display: "flex", flexDirection: "column", gap: "15px" }}>
                 <input placeholder="Your Name" value={inputs.p1} onChange={(e) => setInputs({...inputs, p1: e.target.value})} style={{ padding: "12px", borderRadius: "5px" }} required />
                 {gameMode === "pvp" && <input placeholder="Opponent Name" value={inputs.p2} onChange={(e) => setInputs({...inputs, p2: e.target.value})} style={{ padding: "12px", borderRadius: "5px" }} />}
-                
                 {gameMode === "ai" && (
                   <div style={{ textAlign: "left", display: "flex", flexDirection: "column", gap: "5px" }}>
                     <label style={{ fontSize: "12px", color: currentTheme.light }}>AI DEPTH: {difficulty}</label>
-                    <input 
-                      type="range" min="1" max="20" 
-                      value={difficulty} 
-                      onChange={(e) => setDifficulty(parseInt(e.target.value))} 
-                      style={{ cursor: "pointer", accentColor: currentTheme.light }}
-                    />
+                    <input type="range" min="1" max="20" value={difficulty} onChange={(e) => setDifficulty(parseInt(e.target.value))} style={{ cursor: "pointer", accentColor: currentTheme.light }} />
                   </div>
                 )}
-                
                 <button type="submit" style={{ padding: "15px", backgroundColor: currentTheme.light, fontWeight: "bold", cursor: "pointer" }}>ENTER CLUB</button>
               </form>
           </div>
-
           <div style={{ width: "400px", textAlign: "left" }}>
             <h2 style={{ color: currentTheme.light, borderBottom: `2px solid ${currentTheme.light}` }}>ACTIVE GAMES</h2>
             <div style={{ height: "300px", overflowY: "auto", marginTop: "10px" }}>
@@ -300,7 +288,6 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
             </div>
           </div>
         </div>
-
         <div style={{ marginTop: "50px", maxWidth: "800px", margin: "50px auto", padding: "20px", background: "#111", borderRadius: "15px", border: `2px solid ${currentTheme.light}` }}>
           <h2 style={{ color: "gold", marginBottom: "20px" }}>👑 CLUBHOUSE TREASURY 👑</h2>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: "15px" }}>
@@ -321,15 +308,12 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
   return (
     <div style={{ display: "flex", justifyContent: "center", alignItems: "flex-start", padding: "40px", backgroundColor: "#000", minHeight: "100vh", color: "white" }}>
       <div style={{ margin: "0 40px", textAlign: "center" }}>
-        
-        {/* GAME OVER MODAL */}
         {gameOverMessage && (
-          <div style={{ position: "fixed", top: "50%", left: "50%", transform: "translate(-50%, -50%)", backgroundColor: "rgba(0,0,0,0.9)", padding: "40px", border: `5px solid ${currentTheme.light}`, zIndex: 1000, borderRadius: "20px" }}>
-            <h1 style={{ color: "gold" }}>{gameOverMessage}</h1>
-            <button onClick={() => window.location.reload()} style={{ padding: "10px 20px", background: currentTheme.light, border: "none", fontWeight: "bold", cursor: "pointer" }}>RETURN TO LOBBY</button>
+          <div style={{ position: "fixed", top: "50%", left: "50%", transform: "translate(-50%, -50%)", backgroundColor: "rgba(0,0,0,0.95)", padding: "40px", border: `5px solid ${currentTheme.light}`, zIndex: 1000, borderRadius: "20px", boxShadow: "0 0 50px rgba(0,0,0,1)" }}>
+            <h1 style={{ color: "gold", fontSize: "2.5rem" }}>{gameOverMessage}</h1>
+            <button onClick={() => window.location.reload()} style={{ padding: "15px 30px", background: currentTheme.light, border: "none", fontWeight: "bold", cursor: "pointer", fontSize: "1.2rem", borderRadius: "10px" }}>RETURN TO LOBBY</button>
           </div>
         )}
-
         <div style={{ marginBottom: "20px", display: "flex", justifyContent: "center", alignItems: "center", gap: "15px" }}>
           <div style={{ padding: "10px 20px", borderRadius: "10px", border: `2px solid ${game.turn() === 'w' ? currentTheme.light : "#444"}`, backgroundColor: game.turn() === 'w' ? currentTheme.light : "transparent", color: game.turn() === 'w' ? "#000" : "#fff", fontWeight: "bold" }}>
             WHITE'S TURN {game.turn() === 'w' && "⚡"}
@@ -339,26 +323,13 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
             BLACK'S TURN {game.turn() === 'b' && "⚡"}
           </div>
         </div>
-
-        {/* CHECK NOTIFICATION */}
         {game.inCheck() && !game.isGameOver() && (
-          <div style={{ color: "red", fontWeight: "bold", fontSize: "20px", animation: "blink 1s infinite", marginBottom: "10px" }}>
-            CHECK! 
-          </div>
+          <div style={{ color: "red", fontWeight: "bold", fontSize: "20px", marginBottom: "10px" }}>⚠️ CHECK! ⚠️</div>
         )}
-
         <h2 style={{ marginBottom: "10px" }}>
-          {player1.username} ({assignedRole === 'w' ? 'White' : 'Black'}) 
-          <span style={{ margin: "0 10px", color: currentTheme.light }}>vs</span> 
-          {player2?.username}
+          {player1.username} ({assignedRole === 'w' ? 'White' : 'Black'}) <span style={{ margin: "0 10px", color: currentTheme.light }}>vs</span> {player2?.username}
         </h2>
-        
-        {isMyTurn ? (
-          <p style={{ color: currentTheme.light, fontWeight: "bold", marginBottom: "10px" }}>YOUR MOVE!</p>
-        ) : (
-          <p style={{ color: "#666", marginBottom: "10px" }}>WAITING FOR OPPONENT...</p>
-        )}
-
+        <p style={{ color: isMyTurn ? currentTheme.light : "#666", fontWeight: "bold", marginBottom: "10px" }}>{isMyTurn ? "YOUR MOVE!" : "WAITING FOR OPPONENT..."}</p>
         <div style={{ width: "min(550px, 90vw)", border: `12px solid ${currentTheme.dark}`, borderRadius: "5px" }}>
           <Chessboard 
             position={game.fen()} 
@@ -373,9 +344,6 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
         </div>
         <button onClick={() => window.location.reload()} style={{ marginTop: "20px", padding: "10px 20px", backgroundColor: "#444", color: "white", border: "none", borderRadius: "5px", cursor: "pointer" }}>EXIT TO LOBBY</button>
       </div>
-      <style>{`
-        @keyframes blink { 0% { opacity: 1; } 50% { opacity: 0; } 100% { opacity: 1; } }
-      `}</style>
     </div>
   );
 }
