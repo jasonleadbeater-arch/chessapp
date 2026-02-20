@@ -17,6 +17,8 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
   const [audioUnlocked, setAudioUnlocked] = useState(false);
   const [gameOverMessage, setGameOverMessage] = useState(null);
   const [isJoining, setIsJoining] = useState(false);
+  // ADDED: State for legal move indicators
+  const [optionSquares, setOptionSquares] = useState({});
 
   const bgMusic = useRef(null);
   const stockfish = useRef(null);
@@ -75,7 +77,6 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
     audio.play().catch(e => console.log("Sound error:", e));
   };
 
-  // --- STOCKFISH ENGINE LOGIC ---
   useEffect(() => {
     stockfish.current = new Worker('/stockfish.js');
     stockfish.current.onmessage = (e) => {
@@ -100,6 +101,41 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
     }
   }, [game, gameMode, difficulty]);
 
+  // ADDED: Logic to calculate and display legal moves
+  function getMoveOptions(square) {
+    const moves = game.moves({
+      square,
+      verbose: true,
+    });
+    if (moves.length === 0) {
+      setOptionSquares({});
+      return;
+    }
+
+    const newSquares = {};
+    moves.map((move) => {
+      newSquares[move.to] = {
+        background:
+          game.get(move.to) && game.get(move.to).color !== game.get(square).color
+            ? "radial-gradient(circle, rgba(0,0,0,.1) 85%, transparent 85%)"
+            : "radial-gradient(circle, rgba(0,0,0,.1) 25%, transparent 25%)",
+        borderRadius: "50%",
+      };
+      return move;
+    });
+    newSquares[square] = {
+      background: "rgba(255, 255, 0, 0.4)",
+    };
+    setOptionSquares(newSquares);
+  }
+
+  // ADDED: Square click handler
+  function onSquareClick(square) {
+    // Prevent showing moves if it's not the active player's turn in PvP
+    if (gameMode === "pvp" && game.get(square)?.color !== assignedRole) return;
+    getMoveOptions(square);
+  }
+
   async function onDrop(source, target) {
     if (gameMode === "pvp") {
       const piece = game.get(source);
@@ -117,6 +153,8 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
       
       setGame(gameCopy);
       setDbHistory(updatedHistory); 
+      // ADDED: Clear option squares after a move is made
+      setOptionSquares({});
       
       if (move.captured) {
         playSound(turnBefore === 'w' ? "black_capture.mp3" : "white_capture.mp3");
@@ -203,7 +241,6 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
                 <input placeholder="Your Name" value={inputs.p1} onChange={(e) => setInputs({...inputs, p1: e.target.value})} style={{ padding: "12px", borderRadius: "5px" }} required />
                 {gameMode === "pvp" && <input placeholder="Opponent Name" value={inputs.p2} onChange={(e) => setInputs({...inputs, p2: e.target.value})} style={{ padding: "12px", borderRadius: "5px" }} />}
                 
-                {/* RESTORED DIFFICULTY SLIDER */}
                 {gameMode === "ai" && (
                   <div style={{ textAlign: "left", display: "flex", flexDirection: "column", gap: "5px" }}>
                     <label style={{ fontSize: "12px", color: currentTheme.light }}>AI DEPTH: {difficulty}</label>
@@ -283,6 +320,9 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
           <Chessboard 
             position={game.fen()} 
             onPieceDrop={onDrop} 
+            // MODIFIED: Added these two props to enable legal move dots
+            onSquareClick={onSquareClick}
+            customSquareStyles={optionSquares}
             boardOrientation={assignedRole === 'w' ? 'white' : 'black'}
             customPieces={customPieces}
             customDarkSquareStyle={{ backgroundColor: currentTheme.dark }}
