@@ -46,7 +46,7 @@ export default function ArcadeApp() {
               src={themeIcon} 
               style={{ maxHeight: "100%", width: "auto", filter: "drop-shadow(0px 0px 10px rgba(255,255,255,0.1))" }} 
               alt="Theme Character" 
-              onError={(e) => { e.target.style.display = 'none'; }} // Hides the broken icon if file is missing
+              onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
             />
           ) : (
             <div style={{ height: "140px" }} /> // Spacer to prevent jumpy layout
