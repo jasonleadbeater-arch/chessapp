@@ -1,7 +1,6 @@
 "use client";
 import React, { useState, useEffect } from "react";
-// If your file is actually lowercase "gameboard.js", change the line below to: 
-// import GameBoard from "./components/gameboard";
+// Using the explicit capitalized filename as confirmed
 import GameBoard from "./components/GameBoard";
 
 export default function Home() {
