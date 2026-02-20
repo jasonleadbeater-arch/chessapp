@@ -17,6 +17,8 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
   const [audioUnlocked, setAudioUnlocked] = useState(false);
   const [gameOverMessage, setGameOverMessage] = useState(null);
   const [isJoining, setIsJoining] = useState(false);
+  // State for move indicators
+  const [optionSquares, setOptionSquares] = useState({});
 
   const bgMusic = useRef(null);
   const stockfish = useRef(null);
@@ -59,9 +61,11 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
         .channel('game-updates')
         .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'games' }, (payload) => {
             if (payload.new.fen !== game.fen()) {
-              setGame(new Chess(payload.new.fen));
+              const newGame = new Chess(payload.new.fen);
+              setGame(newGame);
               setDbHistory(payload.new.move_history || []);
               playSound("move.mp3");
+              checkGameOver(newGame);
             }
           }
         ).subscribe();
@@ -75,6 +79,35 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
     audio.play().catch(e => console.log("Sound error:", e));
   };
 
+  const updateCoins = async (username, amount) => {
+    if (!username || username === "Stockfish AI") return;
+    const { data } = await supabase.from('treasury').select('coins').eq('username', username).single();
+    if (data) {
+      await supabase.from('treasury').update({ coins: data.coins + amount }).eq('username', username);
+    }
+  };
+
+  const checkGameOver = async (gameInstance) => {
+    if (gameInstance.isGameOver() && !gameOverMessage) {
+      let message = "";
+      if (gameInstance.isCheckmate()) {
+        const winner = gameInstance.turn() === "w" ? player2.username : player1.username;
+        const loser = gameInstance.turn() === "w" ? player1.username : player2.username;
+        message = `CHECKMATE! ${winner} wins!`;
+        await updateCoins(winner, 3);
+        await updateCoins(loser, -3);
+      } else if (gameInstance.isDraw()) {
+        message = "DRAW!";
+        await updateCoins(player1.username, 1);
+        await updateCoins(player2.username, 1);
+      } else {
+        message = "GAME OVER";
+      }
+      setGameOverMessage(message);
+      fetchData();
+    }
+  };
+
   // --- STOCKFISH ENGINE LOGIC ---
   useEffect(() => {
     stockfish.current = new Worker('/stockfish.js');
@@ -86,6 +119,7 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
           const m = next.move({ from: moveStr.substring(0, 2), to: moveStr.substring(2, 4), promotion: "q" });
           if (m?.captured) playSound("white_capture.mp3");
           else playSound("move.mp3");
+          checkGameOver(next);
           return next;
         });
       }
@@ -99,6 +133,33 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
       stockfish.current.postMessage(`go depth ${difficulty}`);
     }
   }, [game, gameMode, difficulty]);
+
+  // --- LEGAL MOVE INDICATORS ---
+  function getMoveOptions(square) {
+    const moves = game.moves({ square, verbose: true });
+    if (moves.length === 0) {
+      setOptionSquares({});
+      return;
+    }
+    const newSquares = {};
+    moves.map((move) => {
+      newSquares[move.to] = {
+        background:
+          game.get(move.to) && game.get(move.to).color !== game.get(square).color
+            ? "radial-gradient(circle, rgba(0,0,0,.1) 85%, transparent 85%)"
+            : "radial-gradient(circle, rgba(0,0,0,.1) 25%, transparent 25%)",
+        borderRadius: "50%",
+      };
+      return move;
+    });
+    newSquares[square] = { background: "rgba(255, 255, 0, 0.4)" };
+    setOptionSquares(newSquares);
+  }
+
+  function onSquareClick(square) {
+    if (gameMode === "pvp" && game.get(square)?.color !== assignedRole) return;
+    getMoveOptions(square);
+  }
 
   async function onDrop(source, target) {
     if (gameMode === "pvp") {
@@ -117,6 +178,7 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
       
       setGame(gameCopy);
       setDbHistory(updatedHistory); 
+      setOptionSquares({});
       
       if (move.captured) {
         playSound(turnBefore === 'w' ? "black_capture.mp3" : "white_capture.mp3");
@@ -132,6 +194,8 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
         })
         .or(`and(white_player.eq.${player1.username},black_player.eq.${player2.username}),and(white_player.eq.${player2.username},black_player.eq.${player1.username})`);
       }
+
+      checkGameOver(gameCopy);
       return true;
     } catch (e) { return false; }
   }
@@ -142,6 +206,7 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
     setAssignedRole(role === "white" ? "w" : "b");
     setGame(new Chess(activeGame.fen));
     setDbHistory(activeGame.move_history || []);
+    setGameOverMessage(null);
     
     if (role === "white") {
       setPlayer1({ username: activeGame.white_player });
@@ -156,6 +221,7 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
     if (e) e.preventDefault();
     setAudioUnlocked(true); 
     setAssignedRole("w");
+    setGameOverMessage(null);
     const p1 = inputs.p1.toLowerCase().trim();
     const p2 = inputs.p2.toLowerCase().trim();
     if (!p1) return;
@@ -203,7 +269,6 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
                 <input placeholder="Your Name" value={inputs.p1} onChange={(e) => setInputs({...inputs, p1: e.target.value})} style={{ padding: "12px", borderRadius: "5px" }} required />
                 {gameMode === "pvp" && <input placeholder="Opponent Name" value={inputs.p2} onChange={(e) => setInputs({...inputs, p2: e.target.value})} style={{ padding: "12px", borderRadius: "5px" }} />}
                 
-                {/* RESTORED DIFFICULTY SLIDER */}
                 {gameMode === "ai" && (
                   <div style={{ textAlign: "left", display: "flex", flexDirection: "column", gap: "5px" }}>
                     <label style={{ fontSize: "12px", color: currentTheme.light }}>AI DEPTH: {difficulty}</label>
@@ -257,6 +322,14 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
     <div style={{ display: "flex", justifyContent: "center", alignItems: "flex-start", padding: "40px", backgroundColor: "#000", minHeight: "100vh", color: "white" }}>
       <div style={{ margin: "0 40px", textAlign: "center" }}>
         
+        {/* GAME OVER MODAL */}
+        {gameOverMessage && (
+          <div style={{ position: "fixed", top: "50%", left: "50%", transform: "translate(-50%, -50%)", backgroundColor: "rgba(0,0,0,0.9)", padding: "40px", border: `5px solid ${currentTheme.light}`, zIndex: 1000, borderRadius: "20px" }}>
+            <h1 style={{ color: "gold" }}>{gameOverMessage}</h1>
+            <button onClick={() => window.location.reload()} style={{ padding: "10px 20px", background: currentTheme.light, border: "none", fontWeight: "bold", cursor: "pointer" }}>RETURN TO LOBBY</button>
+          </div>
+        )}
+
         <div style={{ marginBottom: "20px", display: "flex", justifyContent: "center", alignItems: "center", gap: "15px" }}>
           <div style={{ padding: "10px 20px", borderRadius: "10px", border: `2px solid ${game.turn() === 'w' ? currentTheme.light : "#444"}`, backgroundColor: game.turn() === 'w' ? currentTheme.light : "transparent", color: game.turn() === 'w' ? "#000" : "#fff", fontWeight: "bold" }}>
             WHITE'S TURN {game.turn() === 'w' && "⚡"}
@@ -266,6 +339,13 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
             BLACK'S TURN {game.turn() === 'b' && "⚡"}
           </div>
         </div>
+
+        {/* CHECK NOTIFICATION */}
+        {game.inCheck() && !game.isGameOver() && (
+          <div style={{ color: "red", fontWeight: "bold", fontSize: "20px", animation: "blink 1s infinite", marginBottom: "10px" }}>
+            ⚠️ CHECK! ⚠️
+          </div>
+        )}
 
         <h2 style={{ marginBottom: "10px" }}>
           {player1.username} ({assignedRole === 'w' ? 'White' : 'Black'}) 
@@ -283,6 +363,8 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
           <Chessboard 
             position={game.fen()} 
             onPieceDrop={onDrop} 
+            onSquareClick={onSquareClick}
+            customSquareStyles={optionSquares}
             boardOrientation={assignedRole === 'w' ? 'white' : 'black'}
             customPieces={customPieces}
             customDarkSquareStyle={{ backgroundColor: currentTheme.dark }}
@@ -291,6 +373,9 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
         </div>
         <button onClick={() => window.location.reload()} style={{ marginTop: "20px", padding: "10px 20px", backgroundColor: "#444", color: "white", border: "none", borderRadius: "5px", cursor: "pointer" }}>EXIT TO LOBBY</button>
       </div>
+      <style>{`
+        @keyframes blink { 0% { opacity: 1; } 50% { opacity: 0; } 100% { opacity: 1; } }
+      `}</style>
     </div>
   );
 }
