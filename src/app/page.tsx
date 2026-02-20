@@ -1,7 +1,7 @@
 "use client";
 import React, { useState, useEffect } from "react";
 // Using the explicit capitalized filename as confirmed
-import GameBoard from "./components/GameBoard";
+import GameBoard from "./components/GameBoard.js";
 
 export default function Home() {
   const [themeKey, setThemeKey] = useState("mickey");
