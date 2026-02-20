@@ -343,7 +343,7 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
         {/* CHECK NOTIFICATION */}
         {game.inCheck() && !game.isGameOver() && (
           <div style={{ color: "red", fontWeight: "bold", fontSize: "20px", animation: "blink 1s infinite", marginBottom: "10px" }}>
-            ⚠️ CHECK! ⚠️
+            CHECK! 
           </div>
         )}
 
