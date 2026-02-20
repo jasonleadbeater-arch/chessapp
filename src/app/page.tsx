@@ -1,5 +1,7 @@
 "use client";
 import React, { useState, useEffect } from "react";
+// If your file is actually lowercase "gameboard.js", change the line below to: 
+// import GameBoard from "./components/gameboard";
 import GameBoard from "./components/GameBoard";
 
 export default function Home() {
@@ -49,10 +51,10 @@ export default function Home() {
                 src={data.icon} 
                 style={{ maxHeight: "100%", width: "auto", filter: "drop-shadow(0px 0px 10px rgba(255,255,255,0.1))" }} 
                 alt="Theme Character" 
-                onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} // FIXED TYPE ERROR HERE
+                onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} 
               />
             ) : (
-              <div style={{ height: "140px" }} /> // Spacer to prevent jumpy layout
+              <div style={{ height: "140px" }} /> 
             )}
             <span style={{ fontSize: "10px", fontWeight: "bold", textAlign: "center" }}>{data.name.toUpperCase()}</span>
           </button>
