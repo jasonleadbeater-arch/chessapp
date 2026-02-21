@@ -17,8 +17,9 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
   const [audioUnlocked, setAudioUnlocked] = useState(false);
   const [gameOverMessage, setGameOverMessage] = useState(null);
   const [isJoining, setIsJoining] = useState(false);
-  // ADDED: State for legal move indicators
   const [optionSquares, setOptionSquares] = useState({});
+  // NEW: Track draw offers
+  const [drawOfferedBy, setDrawOfferedBy] = useState(null);
 
   const bgMusic = useRef(null);
   const stockfish = useRef(null);
@@ -31,6 +32,31 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
   };
   const currentTheme = themes[themeKey] || themes.mickey;
 
+  // --- NEW ACTIONS: UNDO, RESIGN, DRAW ---
+  const handleUndo = () => {
+    const gameCopy = new Chess(game.fen());
+    gameCopy.undo();
+    setGame(gameCopy);
+    // Note: In PvP, you'd usually need opponent permission, but this enables the local action.
+  };
+
+  const handleResign = async () => {
+    const winner = assignedRole === 'w' ? player2?.username : player1?.username;
+    setGameOverMessage(`${assignedRole === 'w' ? "White" : "Black"} Resigned. ${winner} wins!`);
+    // Logic for updating coins could go here in the next step
+  };
+
+  const handleOfferDraw = () => {
+    setDrawOfferedBy(assignedRole);
+    // In a full PvP sync, you'd update a 'draw_offer' column in Supabase here
+  };
+
+  const handleAcceptDraw = () => {
+    setGameOverMessage("Game Drawn by Agreement");
+    setDrawOfferedBy(null);
+  };
+
+  // --- EXISTING LOGIC (Unchanged) ---
   useEffect(() => {
     if (audioUnlocked) {
       if (bgMusic.current) bgMusic.current.pause();
@@ -101,17 +127,12 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
     }
   }, [game, gameMode, difficulty]);
 
-  // ADDED: Logic to calculate and display legal moves
   function getMoveOptions(square) {
-    const moves = game.moves({
-      square,
-      verbose: true,
-    });
+    const moves = game.moves({ square, verbose: true });
     if (moves.length === 0) {
       setOptionSquares({});
       return;
     }
-
     const newSquares = {};
     moves.map((move) => {
       newSquares[move.to] = {
@@ -123,15 +144,11 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
       };
       return move;
     });
-    newSquares[square] = {
-      background: "rgba(255, 255, 0, 0.4)",
-    };
+    newSquares[square] = { background: "rgba(255, 255, 0, 0.4)" };
     setOptionSquares(newSquares);
   }
 
-  // ADDED: Square click handler
   function onSquareClick(square) {
-    // Prevent showing moves if it's not the active player's turn in PvP
     if (gameMode === "pvp" && game.get(square)?.color !== assignedRole) return;
     getMoveOptions(square);
   }
@@ -153,7 +170,6 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
       
       setGame(gameCopy);
       setDbHistory(updatedHistory); 
-      // ADDED: Clear option squares after a move is made
       setOptionSquares({});
       
       if (move.captured) {
@@ -230,7 +246,6 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
     return (
       <div onClick={() => setAudioUnlocked(true)} style={{ minHeight: "100vh", backgroundColor: "#000", color: "white", padding: "20px", textAlign: "center" }}>
         <h1 style={{ fontSize: "3rem", color: currentTheme.light, letterSpacing: "4px" }}>THE TREASURE CHESS CLUB</h1>
-        
         <div style={{ display: "flex", justifyContent: "center", gap: "40px", flexWrap: "wrap", margin: "40px 0" }}>
           <div style={{ padding: "30px", backgroundColor: "#111", borderRadius: "20px", border: `4px solid ${currentTheme.light}`, width: "400px" }}>
               <div style={{ display: "flex", gap: "10px", marginBottom: "20px" }}>
@@ -240,23 +255,15 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
               <form onSubmit={handleStartGame} style={{ display: "flex", flexDirection: "column", gap: "15px" }}>
                 <input placeholder="Your Name" value={inputs.p1} onChange={(e) => setInputs({...inputs, p1: e.target.value})} style={{ padding: "12px", borderRadius: "5px" }} required />
                 {gameMode === "pvp" && <input placeholder="Opponent Name" value={inputs.p2} onChange={(e) => setInputs({...inputs, p2: e.target.value})} style={{ padding: "12px", borderRadius: "5px" }} />}
-                
                 {gameMode === "ai" && (
                   <div style={{ textAlign: "left", display: "flex", flexDirection: "column", gap: "5px" }}>
                     <label style={{ fontSize: "12px", color: currentTheme.light }}>AI DEPTH: {difficulty}</label>
-                    <input 
-                      type="range" min="1" max="20" 
-                      value={difficulty} 
-                      onChange={(e) => setDifficulty(parseInt(e.target.value))} 
-                      style={{ cursor: "pointer", accentColor: currentTheme.light }}
-                    />
+                    <input type="range" min="1" max="20" value={difficulty} onChange={(e) => setDifficulty(parseInt(e.target.value))} style={{ cursor: "pointer", accentColor: currentTheme.light }} />
                   </div>
                 )}
-                
                 <button type="submit" style={{ padding: "15px", backgroundColor: currentTheme.light, fontWeight: "bold", cursor: "pointer" }}>ENTER CLUB</button>
               </form>
           </div>
-
           <div style={{ width: "400px", textAlign: "left" }}>
             <h2 style={{ color: currentTheme.light, borderBottom: `2px solid ${currentTheme.light}` }}>ACTIVE GAMES</h2>
             <div style={{ height: "300px", overflowY: "auto", marginTop: "10px" }}>
@@ -272,18 +279,6 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
             </div>
           </div>
         </div>
-
-        <div style={{ marginTop: "50px", maxWidth: "800px", margin: "50px auto", padding: "20px", background: "#111", borderRadius: "15px", border: `2px solid ${currentTheme.light}` }}>
-          <h2 style={{ color: "gold", marginBottom: "20px" }}>👑 CLUBHOUSE TREASURY 👑</h2>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: "15px" }}>
-            {treasury.map((user, idx) => (
-              <div key={idx} style={{ background: "#222", padding: "10px", borderRadius: "10px", border: "1px solid #444" }}>
-                <div style={{ fontWeight: "bold", color: currentTheme.light }}>{user.username}</div>
-                <div style={{ color: "gold", fontSize: "1.1rem" }}>🪙 {user.coins}</div>
-              </div>
-            ))}
-          </div>
-        </div>
       </div>
     );
   }
@@ -294,6 +289,14 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
     <div style={{ display: "flex", justifyContent: "center", alignItems: "flex-start", padding: "40px", backgroundColor: "#000", minHeight: "100vh", color: "white" }}>
       <div style={{ margin: "0 40px", textAlign: "center" }}>
         
+        {/* GAME OVER MESSAGE */}
+        {gameOverMessage && (
+          <div style={{ position: "fixed", top: "20%", left: "50%", transform: "translateX(-50%)", backgroundColor: "rgba(0,0,0,0.9)", padding: "20px", border: `2px solid ${currentTheme.light}`, zIndex: 10, borderRadius: "10px" }}>
+            <h2 style={{ color: "gold" }}>{gameOverMessage}</h2>
+            <button onClick={() => window.location.reload()} style={{ padding: "10px 20px", cursor: "pointer" }}>BACK TO LOBBY</button>
+          </div>
+        )}
+
         <div style={{ marginBottom: "20px", display: "flex", justifyContent: "center", alignItems: "center", gap: "15px" }}>
           <div style={{ padding: "10px 20px", borderRadius: "10px", border: `2px solid ${game.turn() === 'w' ? currentTheme.light : "#444"}`, backgroundColor: game.turn() === 'w' ? currentTheme.light : "transparent", color: game.turn() === 'w' ? "#000" : "#fff", fontWeight: "bold" }}>
             WHITE'S TURN {game.turn() === 'w' && "⚡"}
@@ -310,17 +313,24 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
           {player2?.username}
         </h2>
         
-        {isMyTurn ? (
-          <p style={{ color: currentTheme.light, fontWeight: "bold", marginBottom: "10px" }}>YOUR MOVE!</p>
-        ) : (
-          <p style={{ color: "#666", marginBottom: "10px" }}>WAITING FOR OPPONENT...</p>
-        )}
+        {/* GAME CONTROLS: UNDO, RESIGN, DRAW */}
+        <div style={{ display: "flex", justifyContent: "center", gap: "10px", marginBottom: "20px" }}>
+           <button onClick={handleUndo} style={{ padding: "8px 15px", backgroundColor: "#333", color: "#fff", border: "1px solid #555", borderRadius: "5px", cursor: "pointer" }}>UNDO</button>
+           <button onClick={handleResign} style={{ padding: "8px 15px", backgroundColor: "#422", color: "#fff", border: "1px solid #633", borderRadius: "5px", cursor: "pointer" }}>RESIGN</button>
+           
+           {drawOfferedBy && drawOfferedBy !== assignedRole ? (
+             <button onClick={handleAcceptDraw} style={{ padding: "8px 15px", backgroundColor: "gold", color: "#000", fontWeight: "bold", borderRadius: "5px", cursor: "pointer" }}>ACCEPT DRAW?</button>
+           ) : (
+             <button onClick={handleOfferDraw} disabled={!!drawOfferedBy} style={{ padding: "8px 15px", backgroundColor: "#334", color: "#fff", border: "1px solid #556", borderRadius: "5px", cursor: drawOfferedBy ? "not-allowed" : "pointer" }}>
+               {drawOfferedBy === assignedRole ? "DRAW OFFERED..." : "OFFER DRAW"}
+             </button>
+           )}
+        </div>
 
         <div style={{ width: "min(550px, 90vw)", border: `12px solid ${currentTheme.dark}`, borderRadius: "5px" }}>
           <Chessboard 
             position={game.fen()} 
             onPieceDrop={onDrop} 
-            // MODIFIED: Added these two props to enable legal move dots
             onSquareClick={onSquareClick}
             customSquareStyles={optionSquares}
             boardOrientation={assignedRole === 'w' ? 'white' : 'black'}
