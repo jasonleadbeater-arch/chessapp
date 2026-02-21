@@ -31,13 +31,11 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
   };
   const currentTheme = themes[themeKey] || themes.mickey;
 
-  // --- NEW: Game Clearance Function ---
   const handleClearGame = async (white, black) => {
     await supabase.from('games').delete().match({ white_player: white, black_player: black });
     fetchData();
   };
 
-  // --- NEW: Synced Draw/Resign Logic ---
   const handleResign = async () => {
     const winner = assignedRole === 'w' ? player2?.username : player1?.username;
     const msg = `${assignedRole === 'w' ? "White" : "Black"} Resigned. ${winner} wins!`;
@@ -61,7 +59,6 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
     }
   };
 
-  // --- EXISTING LOGIC ---
   useEffect(() => {
     if (audioUnlocked) {
       if (bgMusic.current) bgMusic.current.pause();
@@ -91,7 +88,6 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
       const channel = supabase
         .channel('game-updates')
         .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'games' }, (payload) => {
-            // Handle Resign/Draw synced via DB
             if (payload.new.fen.startsWith("RESIGNED:")) {
                setGameOverMessage(payload.new.fen.replace("RESIGNED:", ""));
             } else if (payload.new.fen === "DRAWN_BY_AGREEMENT") {
@@ -102,7 +98,7 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
               setGame(new Chess(payload.new.fen));
               setDbHistory(payload.new.move_history || []);
               playSound("move.mp3");
-              setDrawOfferedBy(null); // Clear draw offer on a move
+              setDrawOfferedBy(null);
             }
           }
         ).subscribe();
@@ -115,8 +111,6 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
     const audio = new Audio(`${currentTheme.audioPath}${f}`);
     audio.play().catch(e => console.log("Sound error:", e));
   };
-
-  // ... (stockfish, getMoveOptions, onSquareClick, onDrop logic remain unchanged) ...
 
   useEffect(() => {
     stockfish.current = new Worker('/stockfish.js');
@@ -254,6 +248,20 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
               <form onSubmit={handleStartGame} style={{ display: "flex", flexDirection: "column", gap: "15px" }}>
                 <input placeholder="Your Name" value={inputs.p1} onChange={(e) => setInputs({...inputs, p1: e.target.value})} style={{ padding: "12px", borderRadius: "5px" }} required />
                 {gameMode === "pvp" && <input placeholder="Opponent Name" value={inputs.p2} onChange={(e) => setInputs({...inputs, p2: e.target.value})} style={{ padding: "12px", borderRadius: "5px" }} />}
+                
+                {/* RESTORED: AI DEPTH SLIDER */}
+                {gameMode === "ai" && (
+                  <div style={{ textAlign: "left", display: "flex", flexDirection: "column", gap: "5px" }}>
+                    <label style={{ fontSize: "12px", color: currentTheme.light }}>AI DEPTH: {difficulty}</label>
+                    <input 
+                      type="range" min="1" max="20" 
+                      value={difficulty} 
+                      onChange={(e) => setDifficulty(parseInt(e.target.value))} 
+                      style={{ cursor: "pointer", accentColor: currentTheme.light }} 
+                    />
+                  </div>
+                )}
+                
                 <button type="submit" style={{ padding: "15px", backgroundColor: currentTheme.light, fontWeight: "bold", cursor: "pointer" }}>ENTER CLUB</button>
               </form>
           </div>
@@ -273,7 +281,6 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
             </div>
           </div>
         </div>
-        {/* RESTORED: Treasury Display */}
         <div style={{ marginTop: "50px", maxWidth: "800px", margin: "50px auto", padding: "20px", background: "#111", borderRadius: "15px", border: `2px solid ${currentTheme.light}` }}>
           <h2 style={{ color: "gold", marginBottom: "20px" }}>👑 CLUBHOUSE TREASURY 👑</h2>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: "15px" }}>
