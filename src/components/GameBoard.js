@@ -238,33 +238,35 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
   if (!player1) {
     return (
       <div onClick={() => setAudioUnlocked(true)} style={{ minHeight: "100vh", backgroundColor: "#000", color: "white", padding: "20px", textAlign: "center" }}>
-        <h1 style={{ fontSize: "3rem", color: currentTheme.light, letterSpacing: "4px" }}>THE TREASURE CHESS CLUB</h1>
-        <div style={{ display: "flex", justifyContent: "center", gap: "40px", flexWrap: "wrap", margin: "40px 0" }}>
+        {/* ADDED: iconBackgroundRemoved.png as a Logo */}
+        <img src="/iconBackgroundRemoved.png" alt="Logo" style={{ width: "120px", marginBottom: "10px" }} />
+        <h1 style={{ fontSize: "3rem", color: currentTheme.light, letterSpacing: "4px", margin: "0" }}>THE TREASURE CHESS CLUB</h1>
+        
+        <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: "40px", flexWrap: "wrap", margin: "40px 0" }}>
+          
+          {/* ADDED: Sorcerer.png next to the form */}
+          <img src="/Sorcerer.png" alt="Sorcerer" style={{ width: "250px", height: "auto", objectFit: "contain" }} />
+
           <div style={{ padding: "30px", backgroundColor: "#111", borderRadius: "20px", border: `4px solid ${currentTheme.light}`, width: "400px" }}>
               <div style={{ display: "flex", gap: "10px", marginBottom: "20px" }}>
-                <button onClick={() => setGameMode("ai")} style={{ flex: 1, padding: "10px", backgroundColor: gameMode === "ai" ? currentTheme.light : "#333", fontWeight: "bold" }}>VS AI</button>
-                <button onClick={() => setGameMode("pvp")} style={{ flex: 1, padding: "10px", backgroundColor: gameMode === "pvp" ? currentTheme.light : "#333", fontWeight: "bold" }}>VS PLAYER</button>
+                <button onClick={() => setGameMode("ai")} style={{ flex: 1, padding: "10px", backgroundColor: gameMode === "ai" ? currentTheme.light : "#333", fontWeight: "bold", border: "none", cursor: "pointer" }}>VS AI</button>
+                <button onClick={() => setGameMode("pvp")} style={{ flex: 1, padding: "10px", backgroundColor: gameMode === "pvp" ? currentTheme.light : "#333", fontWeight: "bold", border: "none", cursor: "pointer" }}>VS PLAYER</button>
               </div>
               <form onSubmit={handleStartGame} style={{ display: "flex", flexDirection: "column", gap: "15px" }}>
-                <input placeholder="Your Name" value={inputs.p1} onChange={(e) => setInputs({...inputs, p1: e.target.value})} style={{ padding: "12px", borderRadius: "5px" }} required />
-                {gameMode === "pvp" && <input placeholder="Opponent Name" value={inputs.p2} onChange={(e) => setInputs({...inputs, p2: e.target.value})} style={{ padding: "12px", borderRadius: "5px" }} />}
+                <input placeholder="Your Name" value={inputs.p1} onChange={(e) => setInputs({...inputs, p1: e.target.value})} style={{ padding: "12px", borderRadius: "5px", border: "none" }} required />
+                {gameMode === "pvp" && <input placeholder="Opponent Name" value={inputs.p2} onChange={(e) => setInputs({...inputs, p2: e.target.value})} style={{ padding: "12px", borderRadius: "5px", border: "none" }} />}
                 
-                {/* RESTORED: AI DEPTH SLIDER */}
                 {gameMode === "ai" && (
                   <div style={{ textAlign: "left", display: "flex", flexDirection: "column", gap: "5px" }}>
                     <label style={{ fontSize: "12px", color: currentTheme.light }}>AI DEPTH: {difficulty}</label>
-                    <input 
-                      type="range" min="1" max="20" 
-                      value={difficulty} 
-                      onChange={(e) => setDifficulty(parseInt(e.target.value))} 
-                      style={{ cursor: "pointer", accentColor: currentTheme.light }} 
-                    />
+                    <input type="range" min="1" max="20" value={difficulty} onChange={(e) => setDifficulty(parseInt(e.target.value))} style={{ cursor: "pointer", accentColor: currentTheme.light }} />
                   </div>
                 )}
                 
-                <button type="submit" style={{ padding: "15px", backgroundColor: currentTheme.light, fontWeight: "bold", cursor: "pointer" }}>ENTER CLUB</button>
+                <button type="submit" style={{ padding: "15px", backgroundColor: currentTheme.light, fontWeight: "bold", cursor: "pointer", border: "none" }}>ENTER CLUB</button>
               </form>
           </div>
+
           <div style={{ width: "400px", textAlign: "left" }}>
             <h2 style={{ color: currentTheme.light, borderBottom: `2px solid ${currentTheme.light}` }}>ACTIVE GAMES</h2>
             <div style={{ height: "300px", overflowY: "auto", marginTop: "10px" }}>
@@ -272,15 +274,16 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
                 <div key={i} style={{ background: "#111", padding: "15px", marginBottom: "10px", borderRadius: "10px", borderLeft: `5px solid ${currentTheme.light}` }}>
                   <p style={{ fontWeight: "bold" }}>{g.white_player} vs {g.black_player}</p>
                   <div style={{ display: "flex", gap: "10px", marginTop: "10px" }}>
-                    <button onClick={() => handleResumeActiveGame(g, "white")} style={{ padding: "5px 10px", fontSize: "11px", backgroundColor: "#fff", color: "#000", cursor: "pointer" }}>Join as {g.white_player}</button>
-                    <button onClick={() => handleResumeActiveGame(g, "black")} style={{ padding: "5px 10px", fontSize: "11px", backgroundColor: "#444", color: "#fff", cursor: "pointer" }}>Join as {g.black_player}</button>
-                    <button onClick={() => handleClearGame(g.white_player, g.black_player)} style={{ padding: "5px 10px", fontSize: "11px", backgroundColor: "red", color: "white", cursor: "pointer" }}>Clear</button>
+                    <button onClick={() => handleResumeActiveGame(g, "white")} style={{ padding: "5px 10px", fontSize: "11px", backgroundColor: "#fff", color: "#000", cursor: "pointer", border: "none" }}>Join as {g.white_player}</button>
+                    <button onClick={() => handleResumeActiveGame(g, "black")} style={{ padding: "5px 10px", fontSize: "11px", backgroundColor: "#444", color: "#fff", cursor: "pointer", border: "none" }}>Join as {g.black_player}</button>
+                    <button onClick={() => handleClearGame(g.white_player, g.black_player)} style={{ padding: "5px 10px", fontSize: "11px", backgroundColor: "red", color: "white", cursor: "pointer", border: "none" }}>Clear</button>
                   </div>
                 </div>
               ))}
             </div>
           </div>
         </div>
+
         <div style={{ marginTop: "50px", maxWidth: "800px", margin: "50px auto", padding: "20px", background: "#111", borderRadius: "15px", border: `2px solid ${currentTheme.light}` }}>
           <h2 style={{ color: "gold", marginBottom: "20px" }}>👑 CLUBHOUSE TREASURY 👑</h2>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: "15px" }}>
@@ -318,12 +321,12 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
         </div>
         <h2 style={{ marginBottom: "10px" }}>{player1.username} ({assignedRole === 'w' ? 'White' : 'Black'}) <span style={{ margin: "0 10px", color: currentTheme.light }}>vs</span> {player2?.username}</h2>
         <div style={{ display: "flex", justifyContent: "center", gap: "10px", marginBottom: "20px" }}>
-           <button onClick={() => { const gc = new Chess(game.fen()); gc.undo(); setGame(gc); }} style={{ padding: "8px 15px", backgroundColor: "#333", color: "#fff", borderRadius: "5px" }}>UNDO</button>
-           <button onClick={handleResign} style={{ padding: "8px 15px", backgroundColor: "#422", color: "#fff", borderRadius: "5px" }}>RESIGN</button>
+           <button onClick={() => { const gc = new Chess(game.fen()); gc.undo(); setGame(gc); }} style={{ padding: "8px 15px", backgroundColor: "#333", color: "#fff", borderRadius: "5px", border: "none", cursor: "pointer" }}>UNDO</button>
+           <button onClick={handleResign} style={{ padding: "8px 15px", backgroundColor: "#422", color: "#fff", borderRadius: "5px", border: "none", cursor: "pointer" }}>RESIGN</button>
            {drawOfferedBy && drawOfferedBy !== assignedRole ? (
-             <button onClick={handleAcceptDraw} style={{ padding: "8px 15px", backgroundColor: "gold", color: "#000", fontWeight: "bold", borderRadius: "5px" }}>ACCEPT DRAW?</button>
+             <button onClick={handleAcceptDraw} style={{ padding: "8px 15px", backgroundColor: "gold", color: "#000", fontWeight: "bold", borderRadius: "5px", border: "none", cursor: "pointer" }}>ACCEPT DRAW?</button>
            ) : (
-             <button onClick={handleOfferDraw} disabled={!!drawOfferedBy} style={{ padding: "8px 15px", backgroundColor: "#334", color: "#fff", borderRadius: "5px" }}>
+             <button onClick={handleOfferDraw} disabled={!!drawOfferedBy} style={{ padding: "8px 15px", backgroundColor: "#334", color: "#fff", borderRadius: "5px", border: "none", cursor: drawOfferedBy ? "not-allowed" : "pointer" }}>
                {drawOfferedBy === assignedRole ? "DRAW OFFERED..." : "OFFER DRAW"}
              </button>
            )}
@@ -331,7 +334,7 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
         <div style={{ width: "min(550px, 90vw)", border: `12px solid ${currentTheme.dark}`, borderRadius: "5px" }}>
           <Chessboard position={game.fen()} onPieceDrop={onDrop} onSquareClick={onSquareClick} customSquareStyles={optionSquares} boardOrientation={assignedRole === 'w' ? 'white' : 'black'} customPieces={customPieces} customDarkSquareStyle={{ backgroundColor: currentTheme.dark }} customLightSquareStyle={{ backgroundColor: currentTheme.light }} />
         </div>
-        <button onClick={() => window.location.reload()} style={{ marginTop: "20px", padding: "10px 20px", backgroundColor: "#444", color: "white", border: "none", borderRadius: "5px" }}>EXIT TO LOBBY</button>
+        <button onClick={() => window.location.reload()} style={{ marginTop: "20px", padding: "10px 20px", backgroundColor: "#444", color: "white", border: "none", borderRadius: "5px", cursor: "pointer" }}>EXIT TO LOBBY</button>
       </div>
     </div>
   );
