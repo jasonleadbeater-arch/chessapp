@@ -296,7 +296,7 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
                 {gameMode === "pvp" && <input placeholder="Opponent Name" value={inputs.p2} onChange={(e) => setInputs({...inputs, p2: e.target.value})} style={{ padding: "12px", borderRadius: "5px", border: "none" }} />}
                 {gameMode === "ai" && (
                   <div style={{ textAlign: "left", display: "flex", flexDirection: "column", gap: "5px" }}>
-                    <label style={{ fontSize: "12px", color: currentTheme.light }}>AI DEPTH: {difficulty}</label>
+                    <label style={{ fontSize: "12px", color: currentTheme.light }}>Quest Level: {difficulty}</label>
                     <input type="range" min="1" max="20" value={difficulty} onChange={(e) => setDifficulty(parseInt(e.target.value))} style={{ cursor: "pointer", accentColor: currentTheme.light }} />
                   </div>
                 )}
