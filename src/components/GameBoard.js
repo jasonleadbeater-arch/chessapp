@@ -31,24 +31,19 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
   };
   const currentTheme = themes[themeKey] || themes.mickey;
 
-  // --- NEW: Coin Management Logic ---
   const updateCoins = async (winnerName, loserName, isDraw = false) => {
-    if (isDraw) return; // No coin change for draws in this version
-    
-    // Add 10 coins to winner
+    if (isDraw) return;
     if (winnerName && winnerName !== "Stockfish AI") {
       const { data } = await supabase.from('treasury').select('coins').eq('username', winnerName).single();
       await supabase.from('treasury').update({ coins: (data?.coins || 0) + 10 }).eq('username', winnerName);
     }
-    // Subtract 5 coins from loser
     if (loserName && loserName !== "Stockfish AI") {
       const { data } = await supabase.from('treasury').select('coins').eq('username', loserName).single();
       await supabase.from('treasury').update({ coins: Math.max(0, (data?.coins || 0) - 5) }).eq('username', loserName);
     }
-    fetchData(); // Refresh lobby treasury
+    fetchData();
   };
 
-  // --- NEW: Game State Checker ---
   const checkGameOver = (gameInstance) => {
     if (gameInstance.isCheckmate()) {
       const winner = gameInstance.turn() === "w" ? player2.username : player1.username;
@@ -292,8 +287,31 @@ export default function GameBoard({ themeKey, assignedRole, setAssignedRole }) {
                 <button onClick={() => setGameMode("pvp")} style={{ flex: 1, padding: "10px", backgroundColor: gameMode === "pvp" ? currentTheme.light : "#333", fontWeight: "bold", border: "none", cursor: "pointer" }}>VS PLAYER</button>
               </div>
               <form onSubmit={handleStartGame} style={{ display: "flex", flexDirection: "column", gap: "15px" }}>
-                <input placeholder="Your Name" value={inputs.p1} onChange={(e) => setInputs({...inputs, p1: e.target.value})} style={{ padding: "12px", borderRadius: "5px", border: "none" }} required />
-                {gameMode === "pvp" && <input placeholder="Opponent Name" value={inputs.p2} onChange={(e) => setInputs({...inputs, p2: e.target.value})} style={{ padding: "12px", borderRadius: "5px", border: "none" }} />}
+                {/* Updated input with list attribute */}
+                <input 
+                  placeholder="Your Name" 
+                  value={inputs.p1} 
+                  onChange={(e) => setInputs({...inputs, p1: e.target.value})} 
+                  style={{ padding: "12px", borderRadius: "5px", border: "none" }} 
+                  list="treasury-names"
+                  required 
+                />
+                <datalist id="treasury-names">
+                  {treasury.map((user, idx) => (
+                    <option key={idx} value={user.username} />
+                  ))}
+                </datalist>
+
+                {gameMode === "pvp" && (
+                  <input 
+                    placeholder="Opponent Name" 
+                    value={inputs.p2} 
+                    onChange={(e) => setInputs({...inputs, p2: e.target.value})} 
+                    style={{ padding: "12px", borderRadius: "5px", border: "none" }} 
+                    list="treasury-names"
+                  />
+                )}
+                
                 {gameMode === "ai" && (
                   <div style={{ textAlign: "left", display: "flex", flexDirection: "column", gap: "5px" }}>
                     <label style={{ fontSize: "12px", color: currentTheme.light }}>Quest Level: {difficulty}</label>
