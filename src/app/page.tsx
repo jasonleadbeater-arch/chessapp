@@ -6,23 +6,6 @@ export default function ArcadeApp() {
   const [selectedTheme, setSelectedTheme] = useState("mickey");
   const [userRole, setUserRole] = useState("w");
 
-  const getThemeIcon = () => {
-    switch (selectedTheme) {
-      case "mickey":
-        return "/assets/Sorcerer.png";
-      case "miraculous":
-        return "/assets/iconBackgroundRemoved.png";
-      case "beast_quest":
-        return "/assets/Tom.png"; 
-      case "moana":
-        return "/assets/moana.png";
-      default:
-        return null;
-    }
-  };
-
-  const themeIcon = getThemeIcon();
-
   return (
     <main style={{ 
       padding: "20px", 
@@ -39,18 +22,14 @@ export default function ArcadeApp() {
         alignItems: "center", 
         gap: "10px" 
       }}>
-        {/* Character Icon Display - Integrated nicely at the top */}
+        {/* Character Icon Display - Now using treasure_icon.png directly */}
         <div style={{ height: "140px", display: "flex", alignItems: "center", justifyContent: "center" }}>
-          {themeIcon ? (
-            <img 
-              src={themeIcon} 
-              style={{ maxHeight: "100%", width: "auto", filter: "drop-shadow(0px 0px 10px rgba(255,255,255,0.1))" }} 
-              alt="Theme Character" 
-              onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-            />
-          ) : (
-            <div style={{ height: "140px" }} /> // Spacer to prevent jumpy layout
-          )}
+          <img 
+            src="/treasure_icon.png" 
+            style={{ maxHeight: "100%", width: "auto", filter: "drop-shadow(0px 0px 10px rgba(255,255,255,0.1))" }} 
+            alt="Treasure Icon" 
+            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+          />
         </div>
 
         <div style={{ backgroundColor: "#111", padding: "15px", borderRadius: "10px", border: "1px solid #333" }}>
@@ -88,7 +67,7 @@ export default function ArcadeApp() {
         gap: "10px" 
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-           <img src="/assets/treasure_icon.png" style={{ width: "40px", height: "40px" }} alt="Coin" />
+           <img src="/treasure_icon.png" style={{ width: "40px", height: "40px" }} alt="Coin" />
            <h3 style={{ margin: 0, color: "gold" }}>Score Tracker</h3>
         </div>
         <p style={{ color: "#888" }}>Win: +3 | Draw: +1 | Loss: -3</p>
