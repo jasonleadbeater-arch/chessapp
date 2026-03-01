@@ -4,14 +4,14 @@ import { supabase } from "../lib/supabase";
 
 /**
  * THE TREASURE CHESS CLUB: SENET MODULE
- * Integrated with Arcade page.tsx
+ * Full Version - No Streamlining
  * Table: treasury | PK: id | Assets: /themes/
  */
 
 export default function SenetBoard({ player1 }) {
   // --- 1. STATE MANAGEMENT ---
   const [board, setBoard] = useState(Array(30).fill(null));
-  const [turn, setTurn] = useState("white"); // Human player
+  const [turn, setTurn] = useState("white"); 
   const [lastThrow, setLastThrow] = useState(0);
   const [isRolling, setIsRolling] = useState(false);
   const [selectedSquare, setSelectedSquare] = useState(null);
@@ -27,13 +27,23 @@ export default function SenetBoard({ player1 }) {
     obsidian: "rgba(0,0,0,0.6)", 
   };
 
-  // --- 2. INITIALIZATION ---
-  useEffect(() => {
+  // --- 2. INITIALIZATION / RESET LOGIC ---
+  const initializeGame = () => {
     const initialBoard = Array(30).fill(null);
     for (let i = 0; i < 10; i++) {
       initialBoard[i] = i % 2 === 0 ? "white" : "black";
     }
     setBoard(initialBoard);
+    setTurn("white");
+    setLastThrow(0);
+    setBorneOff({ white: 0, black: 0 });
+    setGameOver(false);
+    setMessage("Board reset. May the gods be with you.");
+    setSelectedSquare(null);
+  };
+
+  useEffect(() => {
+    initializeGame();
   }, []);
 
   // --- 3. CASTING STICKS ---
@@ -49,7 +59,6 @@ export default function SenetBoard({ player1 }) {
       
       if (count > 12) {
         clearInterval(interval);
-        // Senet Math: 4 sticks (0 flats = 5, else count flats)
         const sticks = Array.from({ length: 4 }, () => Math.round(Math.random()));
         const flats = sticks.reduce((a, b) => a + b, 0);
         const finalScore = flats === 0 ? 5 : flats;
@@ -72,8 +81,14 @@ export default function SenetBoard({ player1 }) {
 
     if (selectedSquare !== null) {
       const targetIndex = selectedSquare + lastThrow;
-      if (index === targetIndex || (targetIndex >= 30 && index === 29)) {
+      
+      // LOGIC FIX: If moving off the board, allow clicking the selected piece itself
+      const isExiting = targetIndex >= 30 && index === selectedSquare;
+      
+      if (index === targetIndex || isExiting) {
         executeMove(selectedSquare, targetIndex);
+      } else {
+        setMessage(`Invalid move. You need to move ${lastThrow} spaces.`);
       }
     }
   };
@@ -143,7 +158,7 @@ export default function SenetBoard({ player1 }) {
     if (!extraTurn) {
       setTurn(turn === "white" ? "black" : "white");
     } else {
-      setMessage(`Extra turn!`);
+      setMessage(`A throw of ${lastThrow} grants an extra turn!`);
     }
   };
 
@@ -168,14 +183,16 @@ export default function SenetBoard({ player1 }) {
   // --- 6. AI LOGIC ---
   useEffect(() => {
     if (turn === "black" && !gameOver && !isRolling) {
-      if (lastThrow === 0) setTimeout(throwSticks, 1500);
-      else {
+      if (lastThrow === 0) {
+        setTimeout(throwSticks, 1500);
+      } else {
         const move = getAiMove();
         setTimeout(() => {
           if (move) executeMove(move.from, move.to);
           else {
             setTurn("white");
             setLastThrow(0);
+            setMessage("Pharaoh is blocked. Your turn.");
           }
         }, 1200);
       }
@@ -197,7 +214,7 @@ export default function SenetBoard({ player1 }) {
       }
     });
     if (moves.length === 0) return null;
-    return moves.sort((a, b) => b.to - a.to)[0]; // Basic aggressive AI
+    return moves.sort((a, b) => b.to - a.to)[0]; 
   };
 
   // --- 7. RENDER HELPERS ---
@@ -230,7 +247,7 @@ export default function SenetBoard({ player1 }) {
   return (
     <div style={{ color: "#fff", textAlign: "center", fontFamily: "serif" }}>
       
-      {/* Controls */}
+      {/* Controls Area */}
       <div style={{ marginBottom: "20px", display: "flex", justifyContent: "center", gap: "10px", alignItems: "center" }}>
         <button onClick={() => setShowRules(true)} style={{ background: "none", color: colors.darkSand, border: `1px solid ${colors.darkSand}`, padding: "5px 12px", borderRadius: "20px", cursor: "pointer", fontSize: "12px" }}>📜 RULES</button>
         {["Novice", "Pharaoh"].map(lvl => (
@@ -263,9 +280,19 @@ export default function SenetBoard({ player1 }) {
         {Array.from({ length: 10 }).map((_, i) => renderSquare(i + 20))}
       </div>
 
-      <div style={{ display: "flex", justifyContent: "center", gap: "50px", fontSize: "1.1rem", color: colors.gold }}>
-        <div>WHITE: {borneOff.white}/5</div>
-        <div>PHARAOH: {borneOff.black}/5</div>
+      {/* Status & Reset */}
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "15px" }}>
+        <div style={{ display: "flex", justifyContent: "center", gap: "50px", fontSize: "1.1rem", color: colors.gold }}>
+          <div>WHITE: {borneOff.white}/5</div>
+          <div>PHARAOH: {borneOff.black}/5</div>
+        </div>
+        
+        <button onClick={initializeGame} style={{ 
+          marginTop: "10px", color: colors.darkSand, background: "none", border: `1px dotted ${colors.darkSand}`, 
+          padding: "5px 15px", cursor: "pointer", borderRadius: "4px", fontSize: "12px" 
+        }}>
+          RESET JOURNEY
+        </button>
       </div>
 
       {/* Rules Modal */}
@@ -273,7 +300,8 @@ export default function SenetBoard({ player1 }) {
         <div style={{ position: "fixed", top: 0, left: 0, width: "100%", height: "100%", backgroundColor: "rgba(0,0,0,0.9)", zIndex: 200, display: "flex", justifyContent: "center", alignItems: "center" }}>
           <div style={{ backgroundColor: "#111", border: `2px solid ${colors.gold}`, padding: "30px", borderRadius: "15px", maxWidth: "450px", textAlign: "left" }}>
             <h2 style={{ color: colors.gold, textAlign: "center", marginTop: 0 }}>THE SACRED RULES</h2>
-            <p>• Move in an 'S' shape. Two same-color pieces side-by-side are protected.</p>
+            <p>• Move in an 'S' shape. To exit, reach square 30 and throw a 1.</p>
+            <p>• <strong>Bear Off:</strong> Once a piece is on Sq 30, click it while having a roll of 1 to exit.</p>
             <p>• Square 26: Must land here exactly.</p>
             <p>• Square 27: Reset to Square 15.</p>
             <button onClick={() => setShowRules(false)} style={{ width: "100%", padding: "12px", background: colors.gold, border: "none", fontWeight: "bold", cursor: "pointer", marginTop: "15px", borderRadius: "5px" }}>CLOSE</button>
