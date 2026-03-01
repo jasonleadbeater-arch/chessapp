@@ -20,7 +20,8 @@ export default function SenetBoard({ player1 }) {
     gold: "#ffcc00",
     darkSand: "#8b7355",
     obsidian: "rgba(0,0,0,0.6)", 
-    raOrange: "#ff4500"
+    raOrange: "#ff4500",
+    papyrus: "#f4e4bc"
   };
 
   // --- 2. INITIALIZATION ---
@@ -80,7 +81,6 @@ export default function SenetBoard({ player1 }) {
     }
   };
 
-  // Dedicated function for the "AFTERLIFE" button
   const handleAfterlifeExit = () => {
     if (selectedSquare === null || lastThrow === 0) return;
     const targetIndex = selectedSquare + lastThrow;
@@ -92,7 +92,6 @@ export default function SenetBoard({ player1 }) {
   const executeMove = async (from, to) => {
     let newBoard = [...board];
 
-    // EXIT LOGIC
     if (to >= 30) {
       if (from < 20) {
         setMessage("Complete the first rows first!");
@@ -111,7 +110,6 @@ export default function SenetBoard({ player1 }) {
       return;
     }
 
-    // HOUSE OF HAPPINESS (26)
     if (from < 25 && to > 25) {
       setMessage("Stop at Square 26 exactly!");
       return;
@@ -227,17 +225,20 @@ export default function SenetBoard({ player1 }) {
     );
   };
 
-  // Eligibility check for the Afterlife button
   const canExit = selectedSquare !== null && (selectedSquare + lastThrow >= 30) && selectedSquare >= 20;
 
   return (
     <div style={{ color: "#fff", textAlign: "center", fontFamily: "serif" }}>
       
-      <div style={{ marginBottom: "20px", display: "flex", justifyContent: "center", gap: "10px" }}>
+      {/* Top Controls */}
+      <div style={{ marginBottom: "20px", display: "flex", justifyContent: "center", gap: "10px", alignItems: "center" }}>
+        <button onClick={() => setShowRules(true)} style={{ background: "none", color: colors.darkSand, border: `1px solid ${colors.darkSand}`, padding: "5px 12px", borderRadius: "20px", cursor: "pointer", fontSize: "12px" }}>
+          📜 SCROLLS
+        </button>
         {["Scribe", "Pharaoh", "Ra"].map(lvl => (
           <button key={lvl} onClick={() => setDifficulty(lvl)} style={{ 
             padding: "5px 15px", borderRadius: "20px", cursor: "pointer", border: `1px solid ${lvl === "Ra" ? colors.raOrange : colors.gold}`,
-            background: difficulty === lvl ? (lvl === "Ra" ? colors.raOrange : colors.gold) : "transparent", color: difficulty === lvl ? "#000" : "#fff", fontWeight: "bold"
+            background: difficulty === lvl ? (lvl === "Ra" ? colors.raOrange : colors.gold) : "transparent", color: difficulty === lvl ? "#000" : "#fff", fontWeight: "bold", fontSize: "12px"
           }}>{lvl}</button>
         ))}
       </div>
@@ -248,14 +249,13 @@ export default function SenetBoard({ player1 }) {
         {lastThrow > 0 && <img src={`/themes/${lastThrow}.png`} alt="Throw" style={{ height: "90px" }} />}
       </div>
 
-      <div style={{ display: "flex", justifyContent: "center", gap: "15px", marginBottom: "20px" }}>
+      <div style={{ display: "flex", justifyContent: "center", gap: "15px", marginBottom: "20px", height: "50px" }}>
         <button onClick={throwSticks} disabled={isRolling || lastThrow > 0 || turn === "black" || gameOver} style={{
           padding: "12px 35px", background: colors.gold, border: "none", fontWeight: "bold", cursor: "pointer", borderRadius: "50px", color: "#000"
         }}>
           {isRolling ? "TOSSING..." : "CAST STICKS"}
         </button>
 
-        {/* --- THE AFTERLIFE BUTTON --- */}
         {canExit && (
           <button onClick={handleAfterlifeExit} style={{
             padding: "12px 35px", background: "linear-gradient(to right, #ffcc00, #ff4500)", border: "none", fontWeight: "bold", cursor: "pointer", borderRadius: "50px", color: "#000", boxShadow: "0 0 15px gold"
@@ -265,6 +265,7 @@ export default function SenetBoard({ player1 }) {
         )}
       </div>
 
+      {/* Grid */}
       <div style={{ 
         display: "grid", gridTemplateColumns: "repeat(10, 60px)", margin: "0 auto", width: "624px", padding: "12px",
         backgroundImage: "url(/themes/boardtexture.png)", backgroundSize: "cover",
@@ -275,13 +276,45 @@ export default function SenetBoard({ player1 }) {
         {Array.from({ length: 10 }).map((_, i) => renderSquare(i + 20))}
       </div>
 
+      {/* Status Footer */}
       <div style={{ marginTop: "20px" }}>
         <div style={{ display: "flex", justifyContent: "center", gap: "50px", color: colors.gold }}>
           <div>WHITE: {borneOff.white}/5</div>
           <div>{difficulty.toUpperCase()}: {borneOff.black}/5</div>
         </div>
-        <button onClick={initializeGame} style={{ color: colors.darkSand, background: "none", border: "1px dotted #8b7355", padding: "5px 15px", cursor: "pointer", marginTop: "15px" }}>RESET JOURNEY</button>
+        <button onClick={initializeGame} style={{ color: colors.darkSand, background: "none", border: "1px dotted #8b7355", padding: "5px 15px", cursor: "pointer", marginTop: "15px", borderRadius: "4px", fontSize: "11px" }}>RESET JOURNEY</button>
       </div>
+
+      {/* --- PAPYRUS RULES MODAL --- */}
+      {showRules && (
+        <div style={{ position: "fixed", top: 0, left: 0, width: "100%", height: "100%", backgroundColor: "rgba(0,0,0,0.85)", zIndex: 9999, display: "flex", justifyContent: "center", alignItems: "center" }}>
+          <div style={{ 
+            backgroundColor: colors.papyrus, 
+            backgroundImage: "url('https://www.transparenttextures.com/patterns/papyros.png')", // Papyrus texture
+            color: "#4a3b2a", 
+            padding: "35px", 
+            borderRadius: "5px", 
+            maxWidth: "500px", 
+            textAlign: "left", 
+            boxShadow: "0 0 40px rgba(0,0,0,0.5)",
+            border: "2px solid #8b7355",
+            fontFamily: "'Courier New', Courier, monospace"
+          }}>
+            <h2 style={{ textAlign: "center", borderBottom: "1px solid #8b7355", paddingBottom: "10px", marginTop: 0 }}>𓁹 THE SCROLLS OF SENET 𓁹</h2>
+            <div style={{ fontSize: "14px", lineHeight: "1.6" }}>
+              <p><strong>1. THE PATH:</strong> Move your pieces in an 'S' shape from Square 1 to 30.</p>
+              <p><strong>2. PROTECTION:</strong> Two pieces of the same color side-by-side cannot be attacked/swapped by the opponent.</p>
+              <p><strong>3. THE TRAPS:</strong> 
+                <br/>• <strong>Sq 26 (Happiness):</strong> You must land here before moving forward.
+                <br/>• <strong>Sq 27 (Water):</strong> Landing here resets you to Square 15 (Rebirth).
+              </p>
+              <p><strong>4. THE AFTERLIFE:</strong> To win, all 5 pieces must exit the board. From Square 30, you need a roll of 1. When eligible, use the 𓂀 <strong>AFTERLIFE</strong> button.</p>
+              <p><strong>5. EXTRA TURNS:</strong> Throws of 1, 4, or 5 grant another cast of the sticks.</p>
+            </div>
+            <button onClick={() => setShowRules(false)} style={{ width: "100%", padding: "12px", background: "#8b7355", color: "#fff", border: "none", fontWeight: "bold", cursor: "pointer", marginTop: "20px" }}>RETURN TO TOMB</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
