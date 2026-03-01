@@ -1,23 +1,25 @@
 "use client";
 import React, { useState, useEffect } from "react";
-import GameBoard from "../components/GameBoard"; // Your Chess Engine
-import SenetBoard from "../components/SenetBoard"; // Your New Senet Engine
+import GameBoard from "../components/GameBoard"; 
+import SenetBoard from "../components/SenetBoard"; 
 import { supabase } from "../lib/supabase";
 
 export default function ArcadeApp() {
-  const [selectedGame, setSelectedGame] = useState("chess"); // New state to toggle games
+  const [selectedGame, setSelectedGame] = useState("chess");
   const [selectedTheme, setSelectedTheme] = useState("mickey");
   const [userRole, setUserRole] = useState("w");
   const [user, setUser] = useState<any>(null);
 
-  // Fetch the user once so Senet can pay out to the treasury
   useEffect(() => {
     async function getActiveUser() {
-      const { data: { user } } = await supabase.auth.getUser();
-      setUser(user);
+      const { data: { user: activeUser } } = await supabase.auth.getUser();
+      setUser(activeUser);
     }
     getActiveUser();
   }, []);
+
+  // Determine which icon to show based on the game
+  const gameIcon = selectedGame === "chess" ? "/treasure_icon.png" : "/themes/sq26.png"; 
 
   return (
     <main style={{ 
@@ -25,83 +27,112 @@ export default function ArcadeApp() {
       textAlign: "center", 
       minHeight: "100vh", 
       backgroundColor: "#000", 
-      color: "#fff" 
+      color: "#fff",
+      fontFamily: "serif"
     }}>
       
-      {/* Header / Logo Section */}
+      {/* Dynamic Header Section */}
       <div style={{ 
         marginBottom: "20px", 
         display: "flex", 
         flexDirection: "column", 
         alignItems: "center", 
-        gap: "10px" 
+        gap: "15px" 
       }}>
-        <div style={{ height: "140px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div style={{ 
+          height: "150px", 
+          width: "150px",
+          display: "flex", 
+          alignItems: "center", 
+          justifyContent: "center",
+          borderRadius: "50%",
+          backgroundColor: selectedGame === "senet" ? "rgba(255, 204, 0, 0.05)" : "transparent",
+          boxShadow: selectedGame === "senet" ? "0 0 30px rgba(255, 204, 0, 0.2)" : "none",
+          transition: "all 0.5s ease"
+        }}>
           <img 
-            src="/treasure_icon.png" 
-            style={{ maxHeight: "100%", width: "auto", filter: "drop-shadow(0px 0px 10px rgba(255,255,255,0.1))" }} 
-            alt="Treasure Icon" 
+            src={gameIcon} 
+            style={{ 
+                maxHeight: "80%", 
+                width: "auto", 
+                filter: selectedGame === "senet" ? "drop-shadow(0px 0px 15px gold)" : "none",
+                transition: "transform 0.3s ease"
+            }} 
+            alt="Game Icon" 
           />
         </div>
 
-        {/* --- GAME & THEME SELECTOR --- */}
-        <div style={{ backgroundColor: "#111", padding: "15px", borderRadius: "10px", border: "1px solid #333", display: "flex", gap: "20px" }}>
+        <h1 style={{ 
+            color: selectedGame === "senet" ? "#ffcc00" : "#fff",
+            letterSpacing: "4px",
+            margin: "0 0 10px 0",
+            textTransform: "uppercase"
+        }}>
+            {selectedGame === "chess" ? "Arcade Treasury" : "Tomb of Senet"}
+        </h1>
+
+        <div style={{ 
+            backgroundColor: "#111", 
+            padding: "15px 25px", 
+            borderRadius: "50px", 
+            border: `1px solid ${selectedGame === "senet" ? "#ffcc00" : "#333"}`, 
+            display: "flex", 
+            gap: "25px",
+            transition: "border 0.5s ease"
+        }}>
           
-          {/* Toggle between Chess and Senet */}
-          <div>
-            <label style={{ fontWeight: "bold", marginRight: "10px", color: "gold" }}>Game: </label>
+          {/* Game Switcher */}
+          <div style={{ display: "flex", alignItems: "center" }}>
+            <label style={{ fontWeight: "bold", marginRight: "10px", color: "#888", fontSize: "14px" }}>GAME</label>
             <select 
               value={selectedGame} 
               onChange={(e) => setSelectedGame(e.target.value)}
-              style={{ padding: "8px", borderRadius: "5px", backgroundColor: "#222", color: "#fff", border: "1px solid #444" }}
+              style={{ padding: "6px 12px", borderRadius: "20px", backgroundColor: "#222", color: "#fff", border: "1px solid #444", cursor: "pointer" }}
             >
               <option value="chess">Chess</option>
-              <option value="senet">Ancient Senet</option>
+              <option value="senet">Senet</option>
             </select>
           </div>
 
-          {/* Theme Selector (Only visible if Chess is selected) */}
+          {/* Theme Switcher (Chess Only) */}
           {selectedGame === "chess" && (
-            <div>
-              <label style={{ fontWeight: "bold", marginRight: "10px", color: "#ccc" }}>Theme: </label>
+            <div style={{ display: "flex", alignItems: "center", borderLeft: "1px solid #333", paddingLeft: "20px" }}>
+              <label style={{ fontWeight: "bold", marginRight: "10px", color: "#888", fontSize: "14px" }}>THEME</label>
               <select 
                 value={selectedTheme} 
                 onChange={(e) => setSelectedTheme(e.target.value)}
-                style={{ padding: "8px", borderRadius: "5px", backgroundColor: "#222", color: "#fff", border: "1px solid #444" }}
+                style={{ padding: "6px 12px", borderRadius: "20px", backgroundColor: "#222", color: "#fff", border: "1px solid #444", cursor: "pointer" }}
               >
-                <option value="mickey">Mickey Mouse</option>
+                <option value="mickey">Mickey</option>
                 <option value="miraculous">Miraculous</option>
                 <option value="beast_quest">Beast Quest</option>
-                <option value="moana">Moana Ocean Adventure</option>
+                <option value="moana">Moana</option>
               </select>
             </div>
           )}
         </div>
       </div>
 
-      {/* --- CONDITIONAL GAME RENDERING --- */}
-      {selectedGame === "chess" ? (
-        <GameBoard themeKey={selectedTheme} assignedRole={userRole} setAssignedRole={setUserRole} />
-      ) : (
-        <SenetBoard player1={user} />
-      )}
+      {/* --- RENDER ACTIVE GAME --- */}
+      <div style={{ marginTop: "20px" }}>
+        {selectedGame === "chess" ? (
+            <GameBoard themeKey={selectedTheme} assignedRole={userRole} setAssignedRole={setUserRole} />
+        ) : (
+            <SenetBoard player1={user} />
+        )}
+      </div>
       
-      {/* Footer Info */}
+      {/* Shared Footer */}
       <div style={{ 
-        marginTop: "40px", 
-        padding: "20px", 
-        borderTop: "1px solid #333", 
-        display: "flex", 
-        flexDirection: "column", 
-        alignItems: "center", 
-        gap: "10px" 
+        marginTop: "50px", 
+        padding: "30px", 
+        borderTop: "1px solid #222", 
+        color: "#555"
       }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-           <img src="/treasure_icon.png" style={{ width: "40px", height: "40px" }} alt="Coin" />
-           <h3 style={{ margin: 0, color: "gold" }}>Clubhouse Treasury</h3>
-        </div>
-        <p style={{ color: "#888" }}>
-          {selectedGame === "chess" ? "Chess Rewards: Win: +3 | Draw: +1 | Loss: -3" : "Senet Rewards: Pharaoh: +20 | Novice: +5"}
+        <p style={{ fontSize: "12px", letterSpacing: "2px" }}>
+            {selectedGame === "chess" 
+                ? "CHESS REWARDS ACTIVE" 
+                : "ANCIENT TREASURY MULTIPLIER ACTIVE"}
         </p>
       </div>
     </main>
