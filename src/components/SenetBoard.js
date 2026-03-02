@@ -2,8 +2,15 @@
 import React, { useState, useEffect, useRef } from "react";
 import { supabase } from "../lib/supabase";
 
-export default function SenetBoard({ player1, gameId = "default-room", myColor = "white" }) {
-  // --- 1. STATE MANAGEMENT ---
+export default function SenetBoard({ player1 }) {
+  // --- 1. LOBBY & PLAYER STATE ---
+  const [gameId, setGameId] = useState(null);
+  const [myColor, setMyColor] = useState("white"); // 'white' or 'black'
+  const [isJoined, setIsJoined] = useState(false);
+  const [inputRoom, setInputRoom] = useState("");
+  const [username, setUsername] = useState(player1?.email?.split('@')[0] || "Traveler");
+
+  // --- 2. GAME STATE ---
   const [board, setBoard] = useState(Array(30).fill(null));
   const [turn, setTurn] = useState("white"); 
   const [lastThrow, setLastThrow] = useState(0);
@@ -17,7 +24,6 @@ export default function SenetBoard({ player1, gameId = "default-room", myColor =
   const [showRules, setShowRules] = useState(false);
   const [raGlow, setRaGlow] = useState(null);
 
-  // Use a ref for borneOff to ensure handleWin always has the latest numbers
   const borneOffRef = useRef({ white: 0, black: 0 });
 
   const colors = {
@@ -28,12 +34,44 @@ export default function SenetBoard({ player1, gameId = "default-room", myColor =
     papyrus: "#f4e4bc"
   };
 
-  // --- 2. INITIALIZATION & SYNC ---
+  // --- 3. LOBBY LOGIC ---
+  const hostGame = async () => {
+    const newRoomId = Math.random().toString(36).substring(2, 7).toUpperCase();
+    const initialBoard = Array(30).fill(null).map((_, i) => i < 10 ? (i % 2 === 0 ? "white" : "black") : null);
+    
+    const { error } = await supabase.from('senet_games').insert([{ 
+      id: newRoomId, 
+      player_white: username,
+      board_state: initialBoard,
+      turn: 'white',
+      borne_off: { white: 0, black: 0 }
+    }]);
+
+    if (!error) {
+      setGameId(newRoomId);
+      setMyColor("white");
+      setGameMode("PvP");
+      setIsJoined(true);
+    }
+  };
+
+  const joinGame = async () => {
+    const { data, error } = await supabase.from('senet_games').select('*').eq('id', inputRoom.toUpperCase()).single();
+    if (data) {
+      await supabase.from('senet_games').update({ player_black: username }).eq('id', data.id);
+      setGameId(data.id);
+      setMyColor("black");
+      setGameMode("PvP");
+      setIsJoined(true);
+    } else {
+      alert("Room not found.");
+    }
+  };
+
+  // --- 4. CORE GAME LOGIC ---
   const initializeGame = () => {
     const initialBoard = Array(30).fill(null);
-    for (let i = 0; i < 10; i++) {
-      initialBoard[i] = i % 2 === 0 ? "white" : "black";
-    }
+    for (let i = 0; i < 10; i++) initialBoard[i] = i % 2 === 0 ? "white" : "black";
     setBoard(initialBoard);
     setTurn("white");
     setLastThrow(0);
@@ -41,149 +79,92 @@ export default function SenetBoard({ player1, gameId = "default-room", myColor =
     borneOffRef.current = { white: 0, black: 0 };
     setGameOver(false);
     setMessage("Board reset. May the gods be with you.");
-    setSelectedSquare(null);
-    setRaGlow(null);
   };
 
   useEffect(() => {
-    if (gameMode !== "PvP") return;
+    if (gameMode === "AI") initializeGame();
+  }, [gameMode]);
 
-    const channel = supabase
-      .channel(`game:${gameId}`)
-      .on('postgres_changes', { 
-        event: 'UPDATE', 
-        schema: 'public', 
-        table: 'senet_games', 
-        filter: `id=eq.${gameId}` 
-      }, (payload) => {
+  // Realtime Sync
+  useEffect(() => {
+    if (!isJoined || gameMode !== "PvP") return;
+    const channel = supabase.channel(`game:${gameId}`).on('postgres_changes', 
+      { event: 'UPDATE', schema: 'public', table: 'senet_games', filter: `id=eq.${gameId}` }, 
+      (payload) => {
         const data = payload.new;
         setBoard(data.board_state);
         setTurn(data.turn);
         setLastThrow(data.last_throw);
-        // CRITICAL: Sync the score too!
         if (data.borne_off) {
           setBorneOff(data.borne_off);
           borneOffRef.current = data.borne_off;
         }
-      })
-      .subscribe();
-
+    }).subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [gameMode, gameId]);
+  }, [isJoined, gameMode, gameId]);
 
-  useEffect(() => {
-    initializeGame();
-  }, []);
-
-  // --- 3. DATABASE UPDATE ---
   const updateRemoteGame = async (newBoard, nextTurn, score, currentBorneOff) => {
     if (gameMode !== "PvP") return;
-    await supabase
-      .from('senet_games')
-      .update({
-        board_state: newBoard,
-        turn: nextTurn,
-        last_throw: score,
-        borne_off: currentBorneOff // Ensure your DB table has this column!
-      })
-      .eq('id', gameId);
+    await supabase.from('senet_games').update({
+      board_state: newBoard, turn: nextTurn, last_throw: score, borne_off: currentBorneOff
+    }).eq('id', gameId);
   };
 
-  // --- 4. CASTING STICKS ---
   const throwSticks = () => {
     if (gameOver || isRolling) return;
     if (gameMode === "PvP" && turn !== myColor) return; 
 
     setIsRolling(true);
-    setMessage("Casting the sticks...");
-    
     let count = 0;
     const interval = setInterval(() => {
       setLastThrow(Math.floor(Math.random() * 5) + 1);
       count++;
-      
       if (count > 12) {
         clearInterval(interval);
-        const sticks = Array.from({ length: 4 }, () => Math.round(Math.random()));
-        const flats = sticks.reduce((a, b) => a + b, 0);
-        const finalScore = flats === 0 ? 5 : flats;
-        
+        const finalScore = [1, 2, 3, 4, 5][Math.floor(Math.random() * 5)];
         setLastThrow(finalScore);
         setIsRolling(false);
-        setMessage(`You threw a ${finalScore}!`);
-
-        if (gameMode === "PvP") {
-            updateRemoteGame(board, turn, finalScore, borneOff);
-        }
+        if (gameMode === "PvP") updateRemoteGame(board, turn, finalScore, borneOff);
       }
     }, 70);
   };
 
-  // --- 5. MOVEMENT LOGIC ---
-  const handleSquareClick = (index) => {
+  const handleSquareClick = (idx) => {
     if (lastThrow === 0 || isRolling || gameOver) return;
-    if (gameMode === "PvP" && turn !== myColor) return; 
+    if (gameMode === "PvP" && turn !== myColor) return;
     if (gameMode === "AI" && turn === "black") return;
 
-    if (board[index] === turn) {
-      setSelectedSquare(index);
+    if (board[idx] === turn) {
+      setSelectedSquare(idx);
     } else if (selectedSquare !== null) {
-      const targetIndex = selectedSquare + lastThrow;
-      if (index === targetIndex) {
-        executeMove(selectedSquare, targetIndex);
-      }
-    }
-  };
-
-  const handleAfterlifeExit = () => {
-    if (selectedSquare === null || lastThrow === 0) return;
-    if (gameMode === "PvP" && turn !== myColor) return;
-    const targetIndex = selectedSquare + lastThrow;
-    if (targetIndex >= 30) {
-      executeMove(selectedSquare, targetIndex);
+      const target = selectedSquare + lastThrow;
+      if (idx === target) executeMove(selectedSquare, target);
     }
   };
 
   const executeMove = async (from, to) => {
     let newBoard = [...board];
-
     if (to >= 30) {
-      if (from < 20) {
-        setMessage("Complete the first rows first!");
-        return;
-      }
+      if (from < 20) { setMessage("Finish the first rows!"); return; }
       newBoard[from] = null;
       const newBorneOff = { ...borneOff, [turn]: borneOff[turn] + 1 };
-      
-      // Update State AND Ref immediately
       setBorneOff(newBorneOff);
       borneOffRef.current = newBorneOff;
-      
       if (newBorneOff[turn] === 5) {
         setGameOver(true);
         handleWin(turn);
-        // Final sync for victory
         if (gameMode === "PvP") updateRemoteGame(newBoard, turn, 0, newBorneOff);
-      } else {
-        finalizeTurn(newBoard, newBorneOff);
-      }
+      } else finalizeTurn(newBoard, newBorneOff);
       return;
     }
 
-    if (from < 25 && to > 25) {
-      setMessage("Stop at Square 26 exactly!");
-      return;
-    }
+    if (from < 25 && to > 25 && to !== 26) { setMessage("Stop at Square 26!"); return; }
 
     const occupant = newBoard[to];
     if (occupant === turn) return; 
-
     if (occupant && occupant !== turn) {
-      const isProtected = (newBoard[to + 1] === occupant) || (newBoard[to - 1] === occupant);
-      if (isProtected && to < 25) {
-        setMessage("Protected by a neighbor!");
-        return;
-      }
+      const isProtected = (newBoard[to+1] === occupant) || (newBoard[to-1] === occupant);
+      if (isProtected && to < 25) { setMessage("Protected!"); return; }
       newBoard[from] = occupant;
       newBoard[to] = turn;
     } else {
@@ -192,149 +173,93 @@ export default function SenetBoard({ player1, gameId = "default-room", myColor =
     }
 
     if (to === 26) {
-      setMessage("Drowned! Reset to 15.");
       newBoard[26] = null;
-      if (!newBoard[14]) newBoard[14] = turn;
-      else newBoard[0] = turn;
+      if (!newBoard[14]) newBoard[14] = turn; else newBoard[0] = turn;
     }
-
     finalizeTurn(newBoard, borneOff);
   };
 
-  const finalizeTurn = (newBoard, currentBorneOff) => {
-    const extraTurn = [1, 4, 5].includes(lastThrow);
-    const nextTurn = extraTurn ? turn : (turn === "white" ? "black" : "white");
-    
-    setBoard(newBoard);
+  const finalizeTurn = (nb, cbo) => {
+    const extra = [1, 4, 5].includes(lastThrow);
+    const nextT = extra ? turn : (turn === "white" ? "black" : "white");
+    setBoard(nb);
     setSelectedSquare(null);
     setLastThrow(0);
-    setTurn(nextTurn);
-    
-    if (extraTurn) setMessage("Extra turn granted!");
-
-    if (gameMode === "PvP") {
-        updateRemoteGame(newBoard, nextTurn, 0, currentBorneOff);
-    }
+    setTurn(nextT);
+    if (gameMode === "PvP") updateRemoteGame(nb, nextT, 0, cbo);
   };
 
   const handleWin = async (winner) => {
+    setMessage(`VICTORY! ${winner.toUpperCase()} enters the Afterlife.`);
     if (winner === "white" && player1?.id) {
-      let prize = difficulty === "Scribe" ? 5 : (difficulty === "Pharaoh" ? 20 : 50);
-      setMessage(`VICTORY! You enter the afterlife. +${prize} coins.`);
-      await supabase.rpc('increment_coins', { row_id: player1.id, x: prize });
-    } else {
-      setMessage(`${winner === "black" ? "The Shadows have" : "You have"} triumphed.`);
+      await supabase.rpc('increment_coins', { row_id: player1.id, x: 20 });
     }
   };
 
-  // --- 6. AI LOGIC ---
+  // AI Logic
   useEffect(() => {
     if (gameMode === "AI" && turn === "black" && !gameOver && !isRolling) {
-      if (lastThrow === 0) setTimeout(throwSticks, 1500);
+      if (lastThrow === 0) setTimeout(throwSticks, 1200);
       else {
-        const move = getAiMove();
-        setTimeout(() => {
-          if (move) {
-            if (difficulty === "Ra") { setRaGlow(move.to); setTimeout(() => setRaGlow(null), 800); }
-            executeMove(move.from, move.to);
-          } else { 
-            setTurn("white"); 
-            setLastThrow(0); 
+        const moves = [];
+        board.forEach((p, i) => {
+          if (p === "black") {
+            const target = i + lastThrow;
+            if (target < 30 && board[target] !== "black") moves.push({ from: i, to: target });
+            else if (i >= 20 && target >= 30) moves.push({ from: i, to: 30 });
           }
-        }, 1200);
+        });
+        const move = moves.sort((a,b) => b.to - a.to)[0];
+        setTimeout(() => move ? executeMove(move.from, move.to) : setTurn("white"), 1000);
       }
     }
   }, [turn, lastThrow, isRolling, gameMode]);
 
-  const getAiMove = () => {
-    const moves = [];
-    board.forEach((p, i) => {
-      if (p === "black") {
-        const target = i + lastThrow;
-        if (target < 30) {
-          const occ = board[target];
-          const prot = (board[target+1] === "white") || (board[target-1] === "white");
-          if (occ !== "black" && !(occ === "white" && prot && target < 25)) {
-            if (!(i < 25 && target > 25)) moves.push({ from: i, to: target });
-          }
-        } else if (i >= 20) moves.push({ from: i, to: 30 });
-      }
-    });
-    if (moves.length === 0) return null;
-    return moves.sort((a, b) => b.to - a.to)[0];
-  };
-
-  // --- RENDER HELPERS (Simplified for clarity) ---
+  // --- 5. RENDERING ---
   const renderSquare = (idx) => {
     const isSelected = selectedSquare === idx;
-    const isRaActive = raGlow === idx;
     const num = idx + 1;
-    const paddedNum = num.toString().padStart(2, '0');
-    const ext = (num === 28) ? 'jpeg' : 'png';
-
+    const padded = num.toString().padStart(2, '0');
     return (
-      <div 
-        key={idx} onClick={() => handleSquareClick(idx)}
-        style={{
-          width: "60px", height: "60px",
-          border: isSelected ? "3px solid gold" : isRaActive ? "3px solid #ff4500" : "1px solid rgba(255,255,255,0.1)",
-          backgroundImage: `url(/themes/sq${paddedNum}.${ext})`,
-          backgroundSize: "cover",
-          backgroundColor: colors.obsidian,
-          display: "flex", alignItems: "center", justifyContent: "center",
-          position: "relative", cursor: "pointer",
-          boxShadow: isRaActive ? "0 0 25px #ff4500" : "none",
-          zIndex: isRaActive ? 10 : 1
-        }}
-      >
-        <span style={{ position: "absolute", bottom: "2px", right: "2px", fontSize: "8px", color: "rgba(255,255,255,0.2)" }}>{num}</span>
-        {board[idx] === "white" && <img src="/themes/white_piece.png" style={{ width: "45px", zIndex: 2 }} />}
-        {board[idx] === "black" && <img src="/themes/black_piece.png" style={{ width: "45px", zIndex: 2 }} />}
+      <div key={idx} onClick={() => handleSquareClick(idx)} style={{
+        width: "60px", height: "60px", border: isSelected ? "3px solid gold" : "1px solid rgba(255,255,255,0.1)",
+        backgroundImage: `url(/themes/sq${padded}.${num === 28 ? 'jpeg' : 'png'})`,
+        backgroundSize: "cover", backgroundColor: colors.obsidian, display: "flex", alignItems: "center", justifyContent: "center", position: "relative", cursor: "pointer"
+      }}>
+        {board[idx] && <img src={`/themes/${board[idx]}_piece.png`} style={{ width: "45px" }} />}
       </div>
     );
   };
 
-  const canExit = selectedSquare !== null && (selectedSquare + lastThrow >= 30) && selectedSquare >= 20;
+  if (!isJoined) {
+    return (
+      <div style={{ padding: "40px", background: "#111", borderRadius: "15px", border: "1px solid #ffcc00", maxWidth: "400px", margin: "0 auto" }}>
+        <h3 style={{ color: "#ffcc00" }}>USER: {username}</h3>
+        <button onClick={() => { setGameMode("AI"); setIsJoined(true); }} style={{ width: "100%", padding: "10px", marginBottom: "10px", background: "#ffcc00", color: "#000", fontWeight: "bold" }}>PLAY VS PHARAOH (AI)</button>
+        <div style={{ borderTop: "1px solid #333", margin: "20px 0", paddingTop: "20px" }}>
+          <button onClick={hostGame} style={{ width: "100%", padding: "10px", marginBottom: "10px", background: "none", color: "#ffcc00", border: "1px solid #ffcc00" }}>HOST PvP MATCH</button>
+          <input type="text" placeholder="ROOM CODE" value={inputRoom} onChange={(e) => setInputRoom(e.target.value)} style={{ width: "100%", padding: "10px", background: "#000", color: "#fff", border: "1px solid #333", marginBottom: "10px" }} />
+          <button onClick={joinGame} style={{ width: "100%", padding: "10px", background: "#333", color: "#fff" }}>JOIN PvP MATCH</button>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div style={{ color: "#fff", textAlign: "center", fontFamily: "serif" }}>
-      <div style={{ marginBottom: "20px", display: "flex", justifyContent: "center", gap: "10px", alignItems: "center" }}>
-        <button onClick={() => { setGameMode(gameMode === "AI" ? "PvP" : "AI"); initializeGame(); }} 
-            style={{ background: colors.obsidian, color: colors.gold, border: `1px solid ${colors.gold}`, padding: "5px 12px", borderRadius: "20px", cursor: "pointer", fontSize: "12px" }}>
-          MODE: {gameMode} {gameMode === "PvP" && `(${myColor.toUpperCase()})`}
-        </button>
-        <button onClick={() => setShowRules(true)} style={{ background: "none", color: colors.darkSand, border: `1px solid ${colors.darkSand}`, padding: "5px 12px", borderRadius: "20px", cursor: "pointer", fontSize: "12px" }}>📜 SCROLLS</button>
+    <div style={{ textAlign: "center", color: "#fff" }}>
+      <p style={{ color: colors.gold }}>{message} {gameMode === "PvP" && `(ROOM: ${gameId})`}</p>
+      <div style={{ display: "flex", justifyContent: "center", gap: "20px", margin: "20px" }}>
+        <button onClick={throwSticks} disabled={lastThrow > 0 || (gameMode === "PvP" && turn !== myColor)} style={{ padding: "10px 30px", background: colors.gold, fontWeight: "bold" }}>CAST STICKS</button>
+        {selectedSquare !== null && selectedSquare + lastThrow >= 30 && <button onClick={handleAfterlifeExit} style={{ padding: "10px 30px", background: "orange" }}>𓂀 AFTERLIFE</button>}
       </div>
-
-      <p style={{ color: difficulty === "Ra" ? colors.raOrange : colors.gold, minHeight: "24px", fontSize: "18px" }}>{message}</p>
-
-      <div style={{ margin: "10px auto", height: "100px", display: "flex", justifyContent: "center", alignItems: "center" }}>
-        {lastThrow > 0 && <img src={`/themes/${lastThrow}.png`} alt="Throw" style={{ height: "90px" }} />}
-      </div>
-
-      <div style={{ display: "flex", justifyContent: "center", gap: "15px", marginBottom: "20px", height: "50px" }}>
-        <button onClick={throwSticks} disabled={isRolling || lastThrow > 0 || (turn !== myColor && gameMode === "PvP") || (turn === "black" && gameMode === "AI") || gameOver} style={{
-          padding: "12px 35px", background: colors.gold, border: "none", fontWeight: "bold", cursor: "pointer", borderRadius: "50px", color: "#000"
-        }}>
-          {isRolling ? "TOSSING..." : "CAST STICKS"}
-        </button>
-        {canExit && (
-          <button onClick={handleAfterlifeExit} style={{ padding: "12px 35px", background: "linear-gradient(to right, #ffcc00, #ff4500)", border: "none", fontWeight: "bold", cursor: "pointer", borderRadius: "50px", color: "#000", boxShadow: "0 0 15px gold" }}>𓂀 AFTERLIFE</button>
-        )}
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(10, 60px)", margin: "0 auto", width: "624px", padding: "12px", backgroundImage: "url(/themes/boardtexture.png)", backgroundSize: "cover", border: `8px solid ${colors.darkSand}`, boxShadow: "0 0 50px rgba(0,0,0,0.8)", borderRadius: "8px" }}>
+      <div style={{ margin: "20px auto", height: "80px" }}>{lastThrow > 0 && <img src={`/themes/${lastThrow}.png`} style={{ height: "100%" }} />}</div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(10, 60px)", margin: "0 auto", width: "600px", border: "8px solid #8b7355" }}>
         {Array.from({ length: 10 }).map((_, i) => renderSquare(i))}
         {[19, 18, 17, 16, 15, 14, 13, 12, 11, 10].map(i => renderSquare(i))}
         {Array.from({ length: 10 }).map((_, i) => renderSquare(i + 20))}
       </div>
-
-      <div style={{ marginTop: "20px" }}>
-        <div style={{ display: "flex", justifyContent: "center", gap: "50px", color: colors.gold }}>
-          <div>WHITE: {borneOff.white}/5</div>
-          <div>{gameMode === "AI" ? difficulty.toUpperCase() : "BLACK"}: {borneOff.black}/5</div>
-        </div>
-        <button onClick={initializeGame} style={{ color: colors.darkSand, background: "none", border: "1px dotted #8b7355", padding: "5px 15px", cursor: "pointer", marginTop: "15px", borderRadius: "4px", fontSize: "11px" }}>RESET JOURNEY</button>
+      <div style={{ marginTop: "20px", color: colors.gold }}>
+        WHITE: {borneOff.white}/5 | BLACK: {borneOff.black}/5
       </div>
     </div>
   );
