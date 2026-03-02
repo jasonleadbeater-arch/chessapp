@@ -12,13 +12,13 @@ export default function SenetBoard({ player1, gameId = "default-room" }) {
   const [borneOff, setBorneOff] = useState({ white: 0, black: 0 });
   const [message, setMessage] = useState("The sticks await your command.");
   const [difficulty, setDifficulty] = useState("Pharaoh");
-  const [gameMode, setGameMode] = useState("AI"); // "AI" or "PvP"
+  const [gameMode, setGameMode] = useState("𓄿𓇋"); // "𓄿𓇋" or "PvP"
   const [gameOver, setGameOver] = useState(false);
   const [showRules, setShowRules] = useState(false);
   const [raGlow, setRaGlow] = useState(null);
   
   // New State for Username integration
-  const [username, setUsername] = useState("Traveler");
+  const [username, setUsername] = useState("𓋴𓈖𓏏");
 
   const colors = {
     gold: "#ffcc00",
