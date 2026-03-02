@@ -35,7 +35,40 @@ export default function SenetBoard({ player1 }) {
     papyrus: "#f4e4bc"
   };
 
-  // --- 3. LOBBY & MATCHMAKING LOGIC ---
+  // --- 3. RECONNECTION LOGIC (The "Refresh-Proof" Hook) ---
+  useEffect(() => {
+    const attemptRejoin = async () => {
+      if (!username || isJoined) return;
+
+      const { data, error } = await supabase
+        .from('senet_games')
+        .select('*')
+        .or(`player_white.eq.${username},player_black.eq.${username}`)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (data && !error) {
+        setGameId(data.id);
+        setMyColor(data.player_white === username ? "white" : "black");
+        setBoard(data.board_state);
+        setTurn(data.turn);
+        setLastThrow(data.last_throw || 0);
+        const currentScore = data.borne_off || { white: 0, black: 0 };
+        setBorneOff(currentScore);
+        borneOffRef.current = currentScore;
+        
+        setGameMode("PvP");
+        setIsJoined(true);
+        setOpponentJoined(!!data.player_black); 
+        setMessage("Welcome back to the tomb.");
+      }
+    };
+
+    attemptRejoin();
+  }, [username, isJoined]);
+
+  // --- 4. LOBBY & MATCHMAKING LOGIC ---
   const hostGame = async () => {
     const newRoomId = Math.random().toString(36).substring(2, 7).toUpperCase();
     const initialBoard = Array(30).fill(null);
@@ -58,9 +91,9 @@ export default function SenetBoard({ player1 }) {
       setMyColor("white");
       setGameMode("PvP");
       setIsJoined(true);
-      setOpponentJoined(false); // Host waits for Guest
+      setOpponentJoined(false); 
     } else {
-      alert("Error creating room: " + error.message);
+      alert("Error: " + error.message);
     }
   };
 
@@ -73,7 +106,7 @@ export default function SenetBoard({ player1 }) {
       .single();
 
     if (data) {
-      if (data.player_black) return alert("This room is full.");
+      if (data.player_black && data.player_black !== username) return alert("Room full.");
       
       await supabase
         .from('senet_games')
@@ -84,13 +117,13 @@ export default function SenetBoard({ player1 }) {
       setMyColor("black");
       setGameMode("PvP");
       setIsJoined(true);
-      setOpponentJoined(true); // Guest starts immediately
+      setOpponentJoined(true);
     } else {
       alert("Room not found.");
     }
   };
 
-  // --- 4. REALTIME SYNC (The "Mirror" Logic) ---
+  // --- 5. REALTIME SYNC ---
   useEffect(() => {
     if (!isJoined || gameMode !== "PvP") return;
 
@@ -104,12 +137,10 @@ export default function SenetBoard({ player1 }) {
       }, (payload) => {
         const data = payload.new;
         
-        // Host detects when Guest joins
         if (myColor === "white" && data.player_black && !opponentJoined) {
           setOpponentJoined(true);
         }
 
-        // Sync board and state
         setBoard(data.board_state);
         setTurn(data.turn);
         setLastThrow(data.last_throw);
@@ -123,7 +154,7 @@ export default function SenetBoard({ player1 }) {
     return () => { supabase.removeChannel(channel); };
   }, [isJoined, gameMode, gameId, myColor, opponentJoined]);
 
-  // --- 5. INITIALIZATION (AI Mode) ---
+  // --- 6. INITIALIZATION (AI Mode) ---
   const initializeAiGame = () => {
     const initialBoard = Array(30).fill(null);
     for (let i = 0; i < 10; i++) {
@@ -141,7 +172,7 @@ export default function SenetBoard({ player1 }) {
     setMessage("Challenge the Pharaoh.");
   };
 
-  // --- 6. CORE GAMEPLAY MECHANICS ---
+  // --- 7. CORE GAMEPLAY MECHANICS ---
   const updateRemoteGame = async (nb, nt, lt, cbo) => {
     if (gameMode !== "PvP") return;
     await supabase.from('senet_games').update({
@@ -203,7 +234,6 @@ export default function SenetBoard({ player1 }) {
   const executeMove = async (from, to) => {
     let newBoard = [...board];
 
-    // EXIT LOGIC
     if (to >= 30) {
       if (from < 20) { setMessage("Complete the first rows first!"); return; }
       newBoard[from] = null;
@@ -222,7 +252,6 @@ export default function SenetBoard({ player1 }) {
       return;
     }
 
-    // SQUARE 26 (Happiness) LOGIC - must land exactly
     if (from < 25 && to > 25 && to !== 26) {
       setMessage("Stop at Square 26 exactly!");
       return;
@@ -231,10 +260,9 @@ export default function SenetBoard({ player1 }) {
     const occupant = newBoard[to];
     if (occupant === turn) return; 
 
-    // ATTACK/SWAP LOGIC
     if (occupant && occupant !== turn) {
       const isProtected = (newBoard[to + 1] === occupant) || (newBoard[to - 1] === occupant);
-      if (isProtected && to < 25) { setMessage("Protected by a neighbor!"); return; }
+      if (isProtected && to < 25) { setMessage("Protected!"); return; }
       newBoard[from] = occupant;
       newBoard[to] = turn;
     } else {
@@ -242,7 +270,6 @@ export default function SenetBoard({ player1 }) {
       newBoard[to] = turn;
     }
 
-    // SQUARE 27 (Water) LOGIC - Reset to 15
     if (to === 26) {
       setMessage("Drowned! Reset to 15.");
       newBoard[26] = null;
@@ -277,7 +304,7 @@ export default function SenetBoard({ player1 }) {
     }
   };
 
-  // --- 7. AI LOGIC ---
+  // --- 8. AI LOGIC ---
   useEffect(() => {
     if (gameMode === "AI" && turn === "black" && !gameOver && !isRolling) {
       if (lastThrow === 0) setTimeout(throwSticks, 1500);
@@ -304,7 +331,7 @@ export default function SenetBoard({ player1 }) {
     }
   }, [turn, lastThrow, isRolling, gameMode]);
 
-  // --- 8. RENDER HELPERS ---
+  // --- 9. RENDER HELPERS ---
   const renderSquare = (idx) => {
     const isSelected = selectedSquare === idx;
     const num = idx + 1;
@@ -321,13 +348,13 @@ export default function SenetBoard({ player1 }) {
           position: "relative", cursor: "pointer"
         }}>
         <span style={{ position: "absolute", bottom: "2px", right: "2px", fontSize: "8px", color: "rgba(255,255,255,0.2)" }}>{num}</span>
-        {board[idx] === "white" && <img src="/themes/white_piece.png" style={{ width: "45px" }} />}
-        {board[idx] === "black" && <img src="/themes/black_piece.png" style={{ width: "45px" }} />}
+        {board[idx] === "white" && <img src="/themes/white_piece.png" style={{ width: "45px" }} alt="W" />}
+        {board[idx] === "black" && <img src="/themes/black_piece.png" style={{ width: "45px" }} alt="B" />}
       </div>
     );
   };
 
-  // --- LOBBY VIEW ---
+  // --- UI VIEWS ---
   if (!isJoined) {
     return (
       <div style={{ padding: "40px", background: "#111", borderRadius: "15px", border: "1px solid #ffcc00", maxWidth: "400px", margin: "0 auto" }}>
@@ -341,18 +368,17 @@ export default function SenetBoard({ player1 }) {
     );
   }
 
-  // --- WAITING VIEW ---
   if (gameMode === "PvP" && !opponentJoined && myColor === "white") {
     return (
       <div style={{ padding: "60px", textAlign: "center", background: "#111", borderRadius: "20px", border: "2px dashed #ffcc00", maxWidth: "500px", margin: "40px auto" }}>
         <h2 style={{ color: "#ffcc00" }}>𓀀 WAITING FOR OPPONENT 𓁟</h2>
-        <p style={{ color: "#8b7355", margin: "20px 0" }}>Share this secret code:</p>
-        <div style={{ fontSize: "40px", fontWeight: "bold", background: "#000", padding: "20px", border: "1px solid #444", color: "#fff" }}>{gameId}</div>
+        <p style={{ color: "#8b7355", margin: "20px 0" }}>Secret Room Code:</p>
+        <div style={{ fontSize: "40px", fontWeight: "bold", background: "#000", padding: "20px", border: "1px solid #444", color: "#fff", letterSpacing: "5px" }}>{gameId}</div>
+        <p style={{ marginTop: "20px", color: "#555", fontSize: "12px" }}>The board will reveal when they arrive.</p>
       </div>
     );
   }
 
-  // --- BOARD VIEW ---
   return (
     <div style={{ color: "#fff", textAlign: "center", fontFamily: "serif" }}>
       <p style={{ color: colors.gold, minHeight: "24px", fontSize: "18px" }}>{message}</p>
@@ -371,8 +397,6 @@ export default function SenetBoard({ player1 }) {
            <button onClick={handleAfterlifeExit} style={{ padding: "12px 35px", background: "orange", border: "none", fontWeight: "bold", borderRadius: "50px", cursor: "pointer" }}>𓂀 AFTERLIFE</button>
         )}
       </div>
-
-      
 
       <div style={{ 
         display: "grid", gridTemplateColumns: "repeat(10, 60px)", margin: "0 auto", width: "624px", padding: "12px", 
