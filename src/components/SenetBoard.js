@@ -12,10 +12,13 @@ export default function SenetBoard({ player1, gameId = "default-room" }) {
   const [borneOff, setBorneOff] = useState({ white: 0, black: 0 });
   const [message, setMessage] = useState("The sticks await your command.");
   const [difficulty, setDifficulty] = useState("Pharaoh");
-  const [gameMode, setGameMode] = useState("AI"); // New: "AI" or "PvP"
+  const [gameMode, setGameMode] = useState("AI"); // "AI" or "PvP"
   const [gameOver, setGameOver] = useState(false);
   const [showRules, setShowRules] = useState(false);
   const [raGlow, setRaGlow] = useState(null);
+  
+  // New State for Username integration
+  const [username, setUsername] = useState("Traveler");
 
   const colors = {
     gold: "#ffcc00",
@@ -26,6 +29,21 @@ export default function SenetBoard({ player1, gameId = "default-room" }) {
   };
 
   // --- 2. INITIALIZATION & SYNC ---
+  // Fetch username from treasury based on player1.id
+  useEffect(() => {
+    async function getTreasuryName() {
+      if (!player1?.id) return;
+      const { data } = await supabase
+        .from("treasury")
+        .select("username")
+        .eq("id", player1.id)
+        .single();
+      
+      if (data?.username) setUsername(data.username);
+    }
+    getTreasuryName();
+  }, [player1]);
+
   const initializeGame = () => {
     const initialBoard = Array(30).fill(null);
     for (let i = 0; i < 10; i++) {
@@ -54,7 +72,6 @@ export default function SenetBoard({ player1, gameId = "default-room" }) {
         filter: `id=eq.${gameId}` 
       }, (payload) => {
         const data = payload.new;
-        // Sync local state with Database
         setBoard(data.board_state);
         setTurn(data.turn);
         setLastThrow(data.last_throw);
@@ -84,7 +101,6 @@ export default function SenetBoard({ player1, gameId = "default-room" }) {
   // --- 4. CASTING STICKS ---
   const throwSticks = () => {
     if (gameOver || isRolling) return;
-    // PvP check: only let player throw if it's their turn
     if (gameMode === "PvP" && turn === "black") return; 
 
     setIsRolling(true);
@@ -105,7 +121,6 @@ export default function SenetBoard({ player1, gameId = "default-room" }) {
         setIsRolling(false);
         setMessage(`You threw a ${finalScore}!`);
 
-        // If PvP, update the throw in the DB so opponent sees it
         if (gameMode === "PvP") {
             updateRemoteGame(board, turn, finalScore);
         }
@@ -116,9 +131,7 @@ export default function SenetBoard({ player1, gameId = "default-room" }) {
   // --- 5. MOVEMENT LOGIC ---
   const handleSquareClick = (index) => {
     if (lastThrow === 0 || isRolling || gameOver) return;
-    // Block clicking if it's PvP and not your turn
     if (gameMode === "PvP" && turn === "black") return; 
-    // Block clicking if it's AI mode and it's Black's turn
     if (gameMode === "AI" && turn === "black") return;
 
     if (board[index] === turn) {
@@ -202,7 +215,6 @@ export default function SenetBoard({ player1, gameId = "default-room" }) {
     
     if (extraTurn) setMessage("Extra turn granted!");
 
-    // CRITICAL: Push to Supabase if in PvP mode
     if (gameMode === "PvP") {
         updateRemoteGame(newBoard, nextTurn, 0);
     }
@@ -219,7 +231,7 @@ export default function SenetBoard({ player1, gameId = "default-room" }) {
     }
   };
 
-  // --- 7. AI LOGIC (Only runs if gameMode is AI) ---
+  // --- 7. AI LOGIC ---
   useEffect(() => {
     if (gameMode === "AI" && turn === "black" && !gameOver && !isRolling) {
       if (lastThrow === 0) setTimeout(throwSticks, 1500);
@@ -291,10 +303,7 @@ export default function SenetBoard({ player1, gameId = "default-room" }) {
   return (
     <div style={{ color: "#fff", textAlign: "center", fontFamily: "serif" }}>
       
-      {/* Top Controls */}
       <div style={{ marginBottom: "20px", display: "flex", justifyContent: "center", gap: "10px", alignItems: "center" }}>
-        
-        {/* Toggle Mode */}
         <button onClick={() => { setGameMode(gameMode === "AI" ? "PvP" : "AI"); initializeGame(); }} 
             style={{ background: colors.obsidian, color: colors.gold, border: `1px solid ${colors.gold}`, padding: "5px 12px", borderRadius: "20px", cursor: "pointer", fontSize: "12px" }}>
           MODE: {gameMode}
@@ -345,7 +354,8 @@ export default function SenetBoard({ player1, gameId = "default-room" }) {
 
       <div style={{ marginTop: "20px" }}>
         <div style={{ display: "flex", justifyContent: "center", gap: "50px", color: colors.gold }}>
-          <div>WHITE: {borneOff.white}/5</div>
+          {/* Linked to Treasury Username */}
+          <div style={{ textTransform: "uppercase" }}>{username}: {borneOff.white}/5</div>
           <div>{gameMode === "AI" ? difficulty.toUpperCase() : "BLACK"}: {borneOff.black}/5</div>
         </div>
         <button onClick={initializeGame} style={{ color: colors.darkSand, background: "none", border: "1px dotted #8b7355", padding: "5px 15px", cursor: "pointer", marginTop: "15px", borderRadius: "4px", fontSize: "11px" }}>RESET JOURNEY</button>
