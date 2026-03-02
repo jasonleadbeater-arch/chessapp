@@ -9,7 +9,7 @@ export default function SenetBoard({ player1 }) {
   const [isJoined, setIsJoined] = useState(false);
   const [opponentJoined, setOpponentJoined] = useState(false);
   const [inputRoom, setInputRoom] = useState("");
-  const [username] = useState(player1?.email?.split('@')[0] || "Traveler");
+  const [username] = useState(player1?.email?.split('@')[0] || "𓋴𓈖𓏏");
 
   // --- 2. CORE GAME STATE ---
   const [board, setBoard] = useState(Array(30).fill(null));
