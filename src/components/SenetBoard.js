@@ -312,7 +312,7 @@ export default function SenetBoard({ player1, gameId = "default-room" }) {
         <button onClick={() => setShowRules(true)} style={{ background: "none", color: colors.darkSand, border: `1px solid ${colors.darkSand}`, padding: "5px 12px", borderRadius: "20px", cursor: "pointer", fontSize: "12px" }}>
           📜 SCROLLS
         </button>
-        {gameMode === "AI" && ["Scribe", "Pharaoh", "Ra"].map(lvl => (
+        {gameMode === "𓄿𓇋" && ["Scribe", "Pharaoh", "Ra"].map(lvl => (
           <button key={lvl} onClick={() => setDifficulty(lvl)} style={{ 
             padding: "5px 15px", borderRadius: "20px", cursor: "pointer", border: `1px solid ${lvl === "Ra" ? colors.raOrange : colors.gold}`,
             background: difficulty === lvl ? (lvl === "Ra" ? colors.raOrange : colors.gold) : "transparent", color: difficulty === lvl ? "#000" : "#fff", fontWeight: "bold", fontSize: "12px"
