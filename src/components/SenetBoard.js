@@ -12,13 +12,16 @@ export default function SenetBoard({ player1, gameId = "default-room" }) {
   const [borneOff, setBorneOff] = useState({ white: 0, black: 0 });
   const [message, setMessage] = useState("The sticks await your command.");
   const [difficulty, setDifficulty] = useState("Pharaoh");
-  const [gameMode, setGameMode] = useState("𓄿𓇋"); // "𓄿𓇋" or "PvP"
+  const [gameMode, setGameMode] = useState("𓄿𓇋"); 
   const [gameOver, setGameOver] = useState(false);
   const [showRules, setShowRules] = useState(false);
   const [raGlow, setRaGlow] = useState(null);
   
-  // New State for Username integration
+  // NEW: Treasury and Entry Logic
   const [username, setUsername] = useState("𓋴𓈖𓏏");
+  const [treasury, setTreasury] = useState([]);
+  const [pvpJoined, setPvpJoined] = useState(false);
+  const [tempUsername, setTempUsername] = useState("");
 
   const colors = {
     gold: "#ffcc00",
@@ -29,7 +32,16 @@ export default function SenetBoard({ player1, gameId = "default-room" }) {
   };
 
   // --- 2. INITIALIZATION & SYNC ---
-  // Fetch username from treasury based on player1.id
+  // Fetch Treasury for the datalist (Mirrors GameBoard.js)
+  useEffect(() => {
+    async function fetchTreasury() {
+      const { data } = await supabase.from("treasury").select("username");
+      if (data) setTreasury(data);
+    }
+    fetchTreasury();
+  }, []);
+
+  // Fetch username from treasury based on player1.id (Auto-login if exists)
   useEffect(() => {
     async function getTreasuryName() {
       if (!player1?.id) return;
@@ -39,7 +51,10 @@ export default function SenetBoard({ player1, gameId = "default-room" }) {
         .eq("id", player1.id)
         .single();
       
-      if (data?.username) setUsername(data.username);
+      if (data?.username) {
+        setUsername(data.username);
+        setTempUsername(data.username);
+      }
     }
     getTreasuryName();
   }, [player1]);
@@ -59,9 +74,8 @@ export default function SenetBoard({ player1, gameId = "default-room" }) {
     setRaGlow(null);
   };
 
-  // REALTIME SUBSCRIPTION (Only runs if gameMode is PvP)
   useEffect(() => {
-    if (gameMode !== "PvP") return;
+    if (gameMode !== "PvP" || !pvpJoined) return;
 
     const channel = supabase
       .channel(`game:${gameId}`)
@@ -79,13 +93,13 @@ export default function SenetBoard({ player1, gameId = "default-room" }) {
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, [gameMode, gameId]);
+  }, [gameMode, gameId, pvpJoined]);
 
   useEffect(() => {
     initializeGame();
   }, []);
 
-  // --- 3. DATABASE UPDATE (The "Push") ---
+  // --- 3. DATABASE UPDATE ---
   const updateRemoteGame = async (newBoard, nextTurn, score) => {
     if (gameMode !== "PvP") return;
     await supabase
@@ -98,7 +112,16 @@ export default function SenetBoard({ player1, gameId = "default-room" }) {
       .eq('id', gameId);
   };
 
-  // --- 4. CASTING STICKS ---
+  // --- 4. PvP JOIN HANDLER ---
+  const handlePvpJoin = (e) => {
+    e.preventDefault();
+    if (!tempUsername) return;
+    setUsername(tempUsername);
+    setPvpJoined(true);
+    initializeGame();
+  };
+
+  // --- 5. CASTING STICKS ---
   const throwSticks = () => {
     if (gameOver || isRolling) return;
     if (gameMode === "PvP" && turn === "black") return; 
@@ -128,7 +151,7 @@ export default function SenetBoard({ player1, gameId = "default-room" }) {
     }, 70);
   };
 
-  // --- 5. MOVEMENT LOGIC ---
+  // --- 6. MOVEMENT LOGIC ---
   const handleSquareClick = (index) => {
     if (lastThrow === 0 || isRolling || gameOver) return;
     if (gameMode === "PvP" && turn === "black") return; 
@@ -220,7 +243,6 @@ export default function SenetBoard({ player1, gameId = "default-room" }) {
     }
   };
 
-  // --- 6. TREASURY PAYOUT ---
   const handleWin = async (winner) => {
     if (winner === "white" && player1?.id) {
       let prize = difficulty === "Scribe" ? 5 : (difficulty === "Pharaoh" ? 20 : 50);
@@ -300,19 +322,46 @@ export default function SenetBoard({ player1, gameId = "default-room" }) {
 
   const canExit = selectedSquare !== null && (selectedSquare + lastThrow >= 30) && selectedSquare >= 20;
 
+  // --- PvP Entry Hall View ---
+  if (gameMode === "PvP" && !pvpJoined) {
+    return (
+      <div style={{ padding: "40px", textAlign: "center", backgroundColor: "#000", minHeight: "60vh", borderRadius: "20px", border: `4px solid ${colors.gold}` }}>
+        <h2 style={{ color: colors.gold, letterSpacing: "2px" }}>ENTER RIVALRY</h2>
+        <form onSubmit={handlePvpJoin} style={{ display: "flex", flexDirection: "column", gap: "20px", maxWidth: "300px", margin: "40px auto" }}>
+          <input 
+            placeholder="Your Name" 
+            value={tempUsername} 
+            onChange={(e) => setTempUsername(e.target.value)} 
+            style={{ padding: "12px", borderRadius: "5px", border: "none" }} 
+            list="treasury-names"
+            required 
+          />
+          <datalist id="treasury-names">
+            {treasury.map((user, idx) => (
+              <option key={idx} value={user.username} />
+            ))}
+          </datalist>
+          <button type="submit" style={{ padding: "12px", backgroundColor: colors.gold, color: "#000", fontWeight: "bold", border: "none", cursor: "pointer", borderRadius: "5px" }}>JOIN CHAMBER</button>
+          <button type="button" onClick={() => setGameMode("𓄿𓇋")} style={{ background: "none", color: "#666", border: "none", cursor: "pointer" }}>Back to AI</button>
+        </form>
+      </div>
+    );
+  }
+
+  // --- Main Board View ---
   return (
     <div style={{ color: "#fff", textAlign: "center", fontFamily: "serif" }}>
       
       <div style={{ marginBottom: "20px", display: "flex", justifyContent: "center", gap: "10px", alignItems: "center" }}>
-        <button onClick={() => { setGameMode(gameMode === "AI" ? "PvP" : "AI"); initializeGame(); }} 
+        <button onClick={() => { setGameMode(gameMode === "AI" ? "PvP" : "AI"); setPvpJoined(false); initializeGame(); }} 
             style={{ background: colors.obsidian, color: colors.gold, border: `1px solid ${colors.gold}`, padding: "5px 12px", borderRadius: "20px", cursor: "pointer", fontSize: "12px" }}>
-          MODE: {gameMode}
+          MODE: {gameMode === "AI" ? "𓄿𓇋" : "PvP"}
         </button>
 
         <button onClick={() => setShowRules(true)} style={{ background: "none", color: colors.darkSand, border: `1px solid ${colors.darkSand}`, padding: "5px 12px", borderRadius: "20px", cursor: "pointer", fontSize: "12px" }}>
           📜 SCROLLS
         </button>
-        {gameMode === "𓄿𓇋" && ["Scribe", "Pharaoh", "Ra"].map(lvl => (
+        {gameMode === "AI" && ["Scribe", "Pharaoh", "Ra"].map(lvl => (
           <button key={lvl} onClick={() => setDifficulty(lvl)} style={{ 
             padding: "5px 15px", borderRadius: "20px", cursor: "pointer", border: `1px solid ${lvl === "Ra" ? colors.raOrange : colors.gold}`,
             background: difficulty === lvl ? (lvl === "Ra" ? colors.raOrange : colors.gold) : "transparent", color: difficulty === lvl ? "#000" : "#fff", fontWeight: "bold", fontSize: "12px"
@@ -354,7 +403,6 @@ export default function SenetBoard({ player1, gameId = "default-room" }) {
 
       <div style={{ marginTop: "20px" }}>
         <div style={{ display: "flex", justifyContent: "center", gap: "50px", color: colors.gold }}>
-          {/* Linked to Treasury Username */}
           <div style={{ textTransform: "uppercase" }}>{username}: {borneOff.white}/5</div>
           <div>{gameMode === "AI" ? difficulty.toUpperCase() : "BLACK"}: {borneOff.black}/5</div>
         </div>
