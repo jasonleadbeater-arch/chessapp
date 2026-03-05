@@ -41,6 +41,7 @@ export default function SenetBoard({ player1 }) {
       setSelectedSquare(idx);
     } else if (selectedSquare !== null) {
       const target = selectedSquare + lastThrow;
+      // Normal move or bearing off (last 3 squares)
       if (idx === target || (target >= 30 && idx === 29)) {
         executeMove(selectedSquare, target);
       }
@@ -51,6 +52,7 @@ export default function SenetBoard({ player1 }) {
     let newBoard = [...board];
     const piece = newBoard[from];
 
+    // 1. BEARING OFF (Winning pieces)
     if (to >= 30) {
       newBoard[from] = null;
       const newBorne = { ...borneOff, [turn]: borneOff[turn] + 1 };
@@ -59,6 +61,19 @@ export default function SenetBoard({ player1 }) {
       return;
     }
 
+    // 2. THE HOUSE OF WATER (Square 27 / Index 26) 
+    // Note: Senet boards are 1-indexed in history, but 0-indexed in code.
+    // If you land on Index 26 (The 27th Square), you drown.
+    if (to === 26) {
+      newBoard[from] = null;
+      // Return to House of Rebirth (Index 14) or start (Index 0) if blocked
+      const rebirthIndex = newBoard[14] === null ? 14 : 0;
+      newBoard[rebirthIndex] = turn;
+      finalizeTurn(newBoard, borneOff);
+      return;
+    }
+
+    // 3. NORMAL MOVE / ATTACK (Swapping)
     const occupant = newBoard[to];
     newBoard[from] = occupant || null;
     newBoard[to] = turn;
@@ -75,7 +90,6 @@ export default function SenetBoard({ player1 }) {
     setTurn(nextTurn);
 
     if (gameMode === "AI" && nextTurn === "black") {
-      // AI Speed: Faster reaction time for "Ra"
       const delay = difficulty === "Ra" ? 400 : 1200;
       setTimeout(aiTurn, delay);
     }
@@ -102,7 +116,6 @@ export default function SenetBoard({ player1 }) {
     const roll = [1, 2, 3, 4, 5][Math.floor(Math.random() * 5)];
     setLastThrow(roll);
     
-    // Ra moves almost instantly after the roll
     const moveDelay = difficulty === "Ra" ? 300 : 800;
 
     setTimeout(() => {
@@ -110,35 +123,55 @@ export default function SenetBoard({ player1 }) {
       let chosenMove = null;
 
       if (difficulty === "Ra") {
-        // Ra Strategy: Prioritize winning, then special squares, then the lead piece
         chosenMove = blackPieces.find(idx => idx + roll >= 30) ||
-                     blackPieces.find(idx => idx + roll >= 26) ||
-                     blackPieces.reverse().find(idx => idx + roll < 30);
+                     blackPieces.find(idx => idx + roll === 25) || // Try to land on "Good" House
+                     blackPieces.reverse().find(idx => idx + roll < 30 && idx + roll !== 26); // Avoid water
       } else {
         chosenMove = blackPieces[Math.floor(Math.random() * blackPieces.length)];
       }
 
       if (chosenMove !== undefined) {
         executeMove(chosenMove, chosenMove + roll);
+      } else {
+        // Skip turn if no moves possible
+        finalizeTurn(board, borneOff);
       }
     }, moveDelay);
   };
 
   // --- RENDER ---
   const renderSquare = (idx) => {
-    const symbols = { 14: "𓋹", 26: "𓈗", 27: "𓏪", 28: "𓁶", 29: "𓅃" };
+    // Mapping your files: sq15, sq26, sq27, sq28, sq29, sq30
+    const themedSquares = [14, 25, 26, 27, 28, 29]; 
+    const isThemed = themedSquares.includes(idx);
+    const themeImg = `/themes/sq${idx + 1}.png`;
+
     return (
       <div key={idx} onClick={() => handleSquareClick(idx)} style={{
         width: "60px", height: "60px", border: "1px solid #444",
         display: "flex", alignItems: "center", justifyContent: "center",
-        background: selectedSquare === idx ? "rgba(255, 204, 0, 0.4)" : "transparent",
+        backgroundImage: isThemed ? `url(${themeImg})` : `url('/themes/boardtexture.png')`,
+        backgroundSize: "cover",
+        backgroundPosition: "center",
+        backgroundColor: selectedSquare === idx ? "rgba(255, 204, 0, 0.4)" : "transparent",
         position: "relative", cursor: "pointer"
       }}>
-        {symbols[idx] && <span style={{ fontSize: "28px", color: colors.gold, opacity: 0.6 }}>{symbols[idx]}</span>}
-        {board[idx] === "white" && <img src="/themes/white_piece.png" style={{ width: "45px", zIndex: 2 }} alt="Pyramid" />}
-        {board[idx] === "black" && <img src="/themes/black_piece.png" style={{ width: "35px", zIndex: 2 }} alt="Deity" />}
+        {board[idx] === "white" && <img src="/themes/white_piece.png" style={{ width: "45px", zIndex: 2 }} alt="White" />}
+        {board[idx] === "black" && <img src="/themes/black_piece.png" style={{ width: "35px", zIndex: 2 }} alt="Black" />}
       </div>
     );
+  };
+
+  // Helper to handle S-Curve rendering
+  const renderBoardRows = () => {
+    const rows = [];
+    for (let r = 0; r < 3; r++) {
+      let rowIndices = Array.from({ length: 10 }, (_, i) => r * 10 + i);
+      // Reverse middle row for S-Curve path
+      if (r === 1) rowIndices.reverse();
+      rows.push(...rowIndices.map(idx => renderSquare(idx)));
+    }
+    return rows;
   };
 
   if (view === "lobby") {
@@ -185,10 +218,9 @@ export default function SenetBoard({ player1 }) {
       <div style={{ 
         display: "grid", gridTemplateColumns: "repeat(10, 60px)", margin: "40px auto", width: "600px", 
         border: `10px solid ${colors.tombEdge}`, backgroundColor: "#111", 
-        backgroundImage: "url('https://www.transparenttextures.com/patterns/dark-leather.png')",
         boxShadow: "0 0 50px rgba(0,0,0,1)"
       }}>
-        {board.map((_, i) => renderSquare(i))}
+        {renderBoardRows()}
       </div>
 
       <div style={{ display: "flex", justifyContent: "center", gap: "60px", color: colors.gold, fontWeight: "bold", fontSize: "18px" }}>
