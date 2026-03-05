@@ -10,39 +10,32 @@ export default function SenetBoard({ player1 }) {
   const [isRolling, setIsRolling] = useState(false);
   const [selectedSquare, setSelectedSquare] = useState(null);
   const [borneOff, setBorneOff] = useState({ white: 0, black: 0 });
-  const [message, setMessage] = useState("Enter the Tomb of Senet.");
   const [gameMode, setGameMode] = useState("AI"); 
   const [activeGameId, setActiveGameId] = useState(null);
   const [availableGames, setAvailableGames] = useState([]);
   const [view, setView] = useState("game"); 
   const [gameOver, setGameOver] = useState(false);
-  const [username, setUsername] = useState("Traveler");
+  
+  // USERNAME SELECTION
+  const [username, setUsername] = useState(player1?.username || "Traveler");
 
   const colors = {
     gold: "#ffcc00",
     darkSand: "#8b7355",
-    obsidian: "rgba(0,0,0,0.6)", 
-    raOrange: "#ff4500"
+    obsidian: "rgba(0,0,0,0.8)"
   };
 
   // --- 2. INITIALIZATION ---
   useEffect(() => {
-    // Ensure board has pieces on first mount
+    // FORCE INITIAL BOARD LOAD
     const initialBoard = Array(30).fill(null);
     for (let i = 0; i < 10; i++) {
       initialBoard[i] = i % 2 === 0 ? "white" : "black";
     }
     setBoard(initialBoard);
+  }, []);
 
-    async function fetchUser() {
-      if (!player1?.id) return;
-      const { data } = await supabase.from("treasury").select("username").eq("id", player1.id).single();
-      if (data?.username) setUsername(data.username);
-    }
-    fetchUser();
-  }, [player1]);
-
-  // Realtime Sync for PvP
+  // Sync for PvP
   useEffect(() => {
     if (gameMode !== "PvP" || !activeGameId) return;
     const channel = supabase.channel(`game:${activeGameId}`)
@@ -57,7 +50,7 @@ export default function SenetBoard({ player1 }) {
     return () => supabase.removeChannel(channel);
   }, [activeGameId, gameMode]);
 
-  // --- 3. LOBBY & LOGGING ---
+  // --- 3. LOBBY & PERSISTENCE ---
   const fetchOpenGames = async () => {
     const { data } = await supabase.from("senet_games").select("*").eq("status", "open");
     setAvailableGames(data || []);
@@ -83,7 +76,7 @@ export default function SenetBoard({ player1 }) {
     if (!activeGameId || gameMode !== "PvP") return;
     await supabase.from("senet_moves").insert([{
       game_id: activeGameId,
-      player_id: player1?.id || username,
+      player_id: username,
       move_from: from,
       move_to: to,
       piece_type: piece,
@@ -111,10 +104,17 @@ export default function SenetBoard({ player1 }) {
 
   const handleSquareClick = (idx) => {
     if (lastThrow === 0 || isRolling) return;
+    
+    // Select your piece
     if (board[idx] === turn) {
       setSelectedSquare(idx);
-    } else if (selectedSquare !== null && idx === selectedSquare + lastThrow) {
-      executeMove(selectedSquare, idx);
+    } 
+    // Execute move if piece is selected
+    else if (selectedSquare !== null) {
+      const targetIdx = selectedSquare + lastThrow;
+      if (idx === targetIdx || (targetIdx >= 30 && idx === 29)) {
+        executeMove(selectedSquare, targetIdx);
+      }
     }
   };
 
@@ -122,7 +122,7 @@ export default function SenetBoard({ player1 }) {
     let newBoard = [...board];
     const piece = newBoard[from];
 
-    // Bearing off (30+)
+    // Bearing off (Winning)
     if (to >= 30) {
       newBoard[from] = null;
       const newBorne = { ...borneOff, [turn]: borneOff[turn] + 1 };
@@ -132,7 +132,7 @@ export default function SenetBoard({ player1 }) {
       return;
     }
 
-    // Capture/Swap
+    // Capture / Move
     const occupant = newBoard[to];
     newBoard[from] = occupant || null;
     newBoard[to] = turn;
@@ -160,15 +160,26 @@ export default function SenetBoard({ player1 }) {
   // --- 5. RENDER ---
   if (view === "lobby") {
     return (
-      <div style={{ padding: "100px", textAlign: "center", color: colors.gold }}>
-        <h2>𓉐 SENET LOBBY</h2>
-        <button onClick={hostGame} style={{ padding: "15px", background: colors.gold, border: "none", cursor: "pointer", fontWeight: "bold" }}>HOST PVP MATCH</button>
-        <div style={{ margin: "20px" }}>
-          <button onClick={fetchOpenGames} style={{ color: "#aaa", background: "none", border: "none", cursor: "pointer" }}>Refresh Open Games</button>
+      <div style={{ padding: "80px", textAlign: "center", color: colors.gold, backgroundColor: "#000", minHeight: "100vh" }}>
+        <h2 style={{ letterSpacing: "5px" }}>𓉐 SENET LOBBY</h2>
+        
+        <div style={{ marginBottom: "30px" }}>
+          <p style={{ fontSize: "12px" }}>YOUR IDENTITY</p>
+          <input 
+            value={username} 
+            onChange={(e) => setUsername(e.target.value)}
+            style={{ padding: "10px", textAlign: "center", background: "#111", color: colors.gold, border: `1px solid ${colors.gold}`, borderRadius: "4px" }}
+          />
+        </div>
+
+        <button onClick={hostGame} style={{ padding: "15px 30px", background: colors.gold, border: "none", cursor: "pointer", fontWeight: "bold", borderRadius: "4px" }}>HOST PVP MATCH</button>
+        
+        <div style={{ margin: "40px auto", maxWidth: "400px" }}>
+          <button onClick={fetchOpenGames} style={{ color: "#aaa", background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}>Refresh Open Games</button>
           {availableGames.map(g => (
-            <div key={g.id} style={{ border: "1px solid #444", padding: "10px", margin: "10px auto", maxWidth: "300px" }}>
-              <span>{g.player_white}'s Game</span>
-              <button onClick={() => {setActiveGameId(g.id); setGameMode("PvP"); setView("game");}} style={{ marginLeft: "10px", color: colors.gold }}>JOIN</button>
+            <div key={g.id} style={{ border: "1px solid #333", padding: "15px", margin: "10px 0", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span>{g.player_white}'s Tomb</span>
+              <button onClick={() => {setActiveGameId(g.id); setGameMode("PvP"); setView("game");}} style={{ background: colors.gold, border: "none", padding: "5px 15px", cursor: "pointer" }}>JOIN</button>
             </div>
           ))}
         </div>
@@ -178,38 +189,57 @@ export default function SenetBoard({ player1 }) {
   }
 
   return (
-    <div style={{ color: "#fff", textAlign: "center", padding: "20px" }}>
-      <h1 style={{ color: colors.gold, letterSpacing: "5px" }}>TOMB OF SENET</h1>
-      <button onClick={() => { setView("lobby"); fetchOpenGames(); }} style={{ background: "none", border: `1px solid ${colors.gold}`, color: colors.gold, padding: "5px 15px", borderRadius: "20px", cursor: "pointer", marginBottom: "20px" }}>
-        {gameMode === "PvP" ? `ROOM: ${activeGameId}` : "MULTIPLAYER LOBBY"}
-      </button>
-
-      <p style={{ color: colors.gold }}>{message}</p>
+    <div style={{ color: "#fff", textAlign: "center", padding: "20px", backgroundColor: "#000", minHeight: "100vh" }}>
+      <h1 style={{ color: colors.gold, letterSpacing: "8px", margin: "0" }}>TOMB OF SENET</h1>
       
-      <div style={{ height: "100px", display: "flex", justifyContent: "center", margin: "10px" }}>
-        {lastThrow > 0 && <img src={`/themes/${lastThrow}.png`} style={{ height: "80px" }} />}
+      <div style={{ margin: "20px 0" }}>
+        <button onClick={() => { setView("lobby"); fetchOpenGames(); }} style={{ background: "none", border: `1px solid ${colors.gold}`, color: colors.gold, padding: "8px 20px", borderRadius: "20px", cursor: "pointer" }}>
+          {gameMode === "PvP" ? `ROOM: ${activeGameId}` : "MULTIPLAYER LOBBY"}
+        </button>
       </div>
 
-      <button onClick={throwSticks} disabled={isRolling || lastThrow > 0} style={{ padding: "12px 40px", background: colors.gold, borderRadius: "50px", border: "none", fontWeight: "bold", cursor: "pointer" }}>
+      <div style={{ height: "100px", display: "flex", justifyContent: "center", alignItems: "center" }}>
+        {lastThrow > 0 ? (
+           <div style={{ color: colors.gold, fontSize: "24px", fontWeight: "bold" }}>CAST: {lastThrow}</div>
+        ) : (
+          <p style={{ color: "#444" }}>Roll the sticks to move.</p>
+        )}
+      </div>
+
+      <button onClick={throwSticks} disabled={isRolling || lastThrow > 0} style={{ padding: "12px 50px", background: colors.gold, borderRadius: "50px", border: "none", fontWeight: "bold", cursor: "pointer", fontSize: "16px" }}>
         {isRolling ? "CASTING..." : "THROW STICKS"}
       </button>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(10, 60px)", margin: "30px auto", width: "600px", border: `5px solid ${colors.darkSand}`, backgroundColor: "#000" }}>
+      <div style={{ 
+        display: "grid", 
+        gridTemplateColumns: "repeat(10, 60px)", 
+        margin: "40px auto", 
+        width: "600px", 
+        border: `10px solid ${colors.darkSand}`,
+        backgroundColor: "#111",
+        boxShadow: "0 0 50px rgba(0,0,0,1)"
+      }}>
         {board.map((cell, i) => (
           <div key={i} onClick={() => handleSquareClick(i)} style={{
-            width: "60px", height: "60px", border: "1px solid #222", 
-            display: "flex", alignItems: "center", justifyContent: "center",
-            boxShadow: selectedSquare === i ? "inset 0 0 10px gold" : "none", cursor: "pointer"
+            width: "60px", 
+            height: "60px", 
+            border: "1px solid #222", 
+            display: "flex", 
+            alignItems: "center", 
+            justifyContent: "center",
+            background: selectedSquare === i ? "rgba(255,204,0,0.2)" : "transparent",
+            cursor: "pointer",
+            transition: "0.2s"
           }}>
-            {cell === "white" && <img src="/themes/white_piece.png" style={{ width: "40px" }} />}
-            {cell === "black" && <img src="/themes/black_piece.png" style={{ width: "40px" }} />}
+            {cell === "white" && <div style={{ width: "40px", height: "40px", borderRadius: "50%", background: "#eee", boxShadow: "0 4px #999" }} />}
+            {cell === "black" && <div style={{ width: "40px", height: "40px", borderRadius: "50%", background: "#333", boxShadow: "0 4px #000" }} />}
           </div>
         ))}
       </div>
 
-      <div style={{ display: "flex", justifyContent: "center", gap: "50px", color: colors.gold }}>
-        <div>WHITE: {borneOff.white}/5</div>
-        <div>BLACK: {borneOff.black}/5</div>
+      <div style={{ display: "flex", justifyContent: "center", gap: "60px", color: colors.gold, fontWeight: "bold" }}>
+        <div>{username.toUpperCase()}: {borneOff.white}/5</div>
+        <div>OPPONENT: {borneOff.black}/5</div>
       </div>
     </div>
   );
