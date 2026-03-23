@@ -1,12 +1,9 @@
-
 "use client";
 import React, { useState, useEffect } from "react";
 import { supabase } from "../lib/supabase";
 
 export default function SenetBoard({ player1 }) {
   // --- 1. STATE MANAGEMENT ---
-  const [activeGameId, setActiveGameId] = useState(null);
-  const [availableGames, setAvailableGames] = useState([]);
   const [board, setBoard] = useState(Array(30).fill(null));
   const [turn, setTurn] = useState("white"); 
   const [lastThrow, setLastThrow] = useState(0);
@@ -14,57 +11,41 @@ export default function SenetBoard({ player1 }) {
   const [selectedSquare, setSelectedSquare] = useState(null);
   const [borneOff, setBorneOff] = useState({ white: 0, black: 0 });
   const [message, setMessage] = useState("Enter the Tomb of Senet.");
-  const [difficulty, setDifficulty] = useState("Pharaoh");
   const [gameMode, setGameMode] = useState("AI"); 
+  const [activeGameId, setActiveGameId] = useState(null);
+  const [availableGames, setAvailableGames] = useState([]);
+  const [view, setView] = useState("game"); 
   const [gameOver, setGameOver] = useState(false);
-  const [showRules, setShowRules] = useState(false);
-  const [raGlow, setRaGlow] = useState(null);
-  const [username, setUsername] = useState("𓋴𓈖𓏏");
-  const [roomCodeInput, setRoomCodeInput] = useState("");
+  const [username, setUsername] = useState("Traveler");
 
   const colors = {
     gold: "#ffcc00",
     darkSand: "#8b7355",
     obsidian: "rgba(0,0,0,0.6)", 
-    raOrange: "#ff4500",
-    papyrus: "#f4e4bc"
+    raOrange: "#ff4500"
   };
 
-  // --- 2. INITIALIZATION & SYNC ---
+  // --- 2. INITIALIZATION ---
   useEffect(() => {
-    async function getTreasuryName() {
-      if (!player1?.id) return;
-      const { data } = await supabase.from("treasury").select("username").eq("id", player1.id).single();
-      if (data?.username) setUsername(data.username);
-    }
-    getTreasuryName();
-    fetchOpenGames();
-  }, [player1]);
-
-  const fetchOpenGames = async () => {
-    const { data } = await supabase.from("senet_games").select("*").eq("status", "open");
-    if (data) setAvailableGames(data);
-  };
-
-  const initializeGame = () => {
+    // Ensure board has pieces on first mount
     const initialBoard = Array(30).fill(null);
     for (let i = 0; i < 10; i++) {
       initialBoard[i] = i % 2 === 0 ? "white" : "black";
     }
     setBoard(initialBoard);
-    setTurn("white");
-    setLastThrow(0);
-    setBorneOff({ white: 0, black: 0 });
-    setGameOver(false);
-    setMessage("Board reset. May the gods be with you.");
-    setSelectedSquare(null);
-  };
 
-  // Realtime Sync
+    async function fetchUser() {
+      if (!player1?.id) return;
+      const { data } = await supabase.from("treasury").select("username").eq("id", player1.id).single();
+      if (data?.username) setUsername(data.username);
+    }
+    fetchUser();
+  }, [player1]);
+
+  // Realtime Sync for PvP
   useEffect(() => {
-    if (!activeGameId) return;
-    const channel = supabase
-      .channel(`game:${activeGameId}`)
+    if (gameMode !== "PvP" || !activeGameId) return;
+    const channel = supabase.channel(`game:${activeGameId}`)
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'senet_games', filter: `id=eq.${activeGameId}` }, 
       (payload) => {
         const data = payload.new;
@@ -72,63 +53,37 @@ export default function SenetBoard({ player1 }) {
         setTurn(data.turn);
         setLastThrow(data.last_throw);
         setBorneOff(data.borne_off);
-      })
-      .subscribe();
+      }).subscribe();
     return () => supabase.removeChannel(channel);
-  }, [activeGameId]);
+  }, [activeGameId, gameMode]);
 
-  // --- 3. PERSISTENCE LOGIC ---
-  const hostPvpMatch = async () => {
-    const code = Math.random().toString(36).substring(2, 7).toUpperCase();
-    const initialBoard = Array(30).fill(null).map((_, i) => i < 10 ? (i % 2 === 0 ? "white" : "black") : null);
-    
+  // --- 3. LOBBY & LOGGING ---
+  const fetchOpenGames = async () => {
+    const { data } = await supabase.from("senet_games").select("*").eq("status", "open");
+    setAvailableGames(data || []);
+  };
+
+  const hostGame = async () => {
+    const roomCode = Math.random().toString(36).substring(2, 7).toUpperCase();
     const { error } = await supabase.from("senet_games").insert([{
-      id: code,
+      id: roomCode,
       player_white: username,
-      board_state: initialBoard,
-      turn: "white",
-      last_throw: 0,
-      status: "open"
+      board_state: board,
+      status: "open",
+      turn: "white"
     }]);
-
     if (!error) {
-      setActiveGameId(code);
+      setActiveGameId(roomCode);
       setGameMode("PvP");
-    } else {
-      alert(error.message);
+      setView("game");
     }
-  };
-
-  const joinPvpMatch = async () => {
-    if (!roomCodeInput) return;
-    const { error } = await supabase.from("senet_games").update({
-      player_black: username,
-      status: "active"
-    }).eq("id", roomCodeInput);
-
-    if (!error) {
-      setActiveGameId(roomCodeInput);
-      setGameMode("PvP");
-    } else {
-      alert("Tomb not found or access denied.");
-    }
-  };
-
-  const updateRemoteGame = async (newBoard, nextTurn, score, newBorne) => {
-    if (gameMode !== "PvP" || !activeGameId) return;
-    await supabase.from('senet_games').update({
-      board_state: newBoard,
-      turn: nextTurn,
-      last_throw: score,
-      borne_off: newBorne || borneOff
-    }).eq('id', activeGameId);
   };
 
   const logMove = async (from, to, piece) => {
-    if (!activeGameId) return;
+    if (!activeGameId || gameMode !== "PvP") return;
     await supabase.from("senet_moves").insert([{
-      game_id: activeGameId, 
-      player_id: player1?.id, 
+      game_id: activeGameId,
+      player_id: player1?.id || username,
       move_from: from,
       move_to: to,
       piece_type: piece,
@@ -136,7 +91,7 @@ export default function SenetBoard({ player1 }) {
     }]);
   };
 
-  // --- 4. GAMEPLAY ---
+  // --- 4. GAMEPLAY LOGIC ---
   const throwSticks = () => {
     if (gameOver || isRolling) return;
     setIsRolling(true);
@@ -144,23 +99,22 @@ export default function SenetBoard({ player1 }) {
     const interval = setInterval(() => {
       setLastThrow(Math.floor(Math.random() * 5) + 1);
       count++;
-      if (count > 12) {
+      if (count > 10) {
         clearInterval(interval);
-        const sticks = Array.from({ length: 4 }, () => Math.round(Math.random()));
-        const flats = sticks.reduce((a, b) => a + b, 0);
-        const finalScore = flats === 0 ? 5 : flats;
+        const finalScore = [1, 2, 3, 4, 5][Math.floor(Math.random() * 5)];
         setLastThrow(finalScore);
         setIsRolling(false);
-        if (gameMode === "PvP") updateRemoteGame(board, turn, finalScore);
+        if (gameMode === "PvP") updateRemote(board, turn, finalScore, borneOff);
       }
-    }, 70);
+    }, 80);
   };
 
-  const handleSquareClick = (index) => {
-    if (lastThrow === 0 || isRolling || gameOver) return;
-    if (board[index] === turn) setSelectedSquare(index);
-    else if (selectedSquare !== null && index === selectedSquare + lastThrow) {
-      executeMove(selectedSquare, index);
+  const handleSquareClick = (idx) => {
+    if (lastThrow === 0 || isRolling) return;
+    if (board[idx] === turn) {
+      setSelectedSquare(idx);
+    } else if (selectedSquare !== null && idx === selectedSquare + lastThrow) {
+      executeMove(selectedSquare, idx);
     }
   };
 
@@ -168,39 +122,23 @@ export default function SenetBoard({ player1 }) {
     let newBoard = [...board];
     const piece = newBoard[from];
 
+    // Bearing off (30+)
     if (to >= 30) {
-      if (from < 20) return setMessage("Finish the rows first!");
       newBoard[from] = null;
       const newBorne = { ...borneOff, [turn]: borneOff[turn] + 1 };
       setBorneOff(newBorne);
       await logMove(from, 30, piece);
-      if (newBorne[turn] === 5) setGameOver(true);
-      else finalizeTurn(newBoard, newBorne);
+      finalizeTurn(newBoard, newBorne);
       return;
     }
 
-    // Protection/Swap Logic
+    // Capture/Swap
     const occupant = newBoard[to];
-    if (occupant === turn) return;
-    if (occupant && to < 25) {
-      const isProtected = (newBoard[to + 1] === occupant) || (newBoard[to - 1] === occupant);
-      if (isProtected) return setMessage("Piece is protected!");
-      newBoard[from] = occupant;
-      newBoard[to] = turn;
-    } else {
-      newBoard[from] = null;
-      newBoard[to] = turn;
-    }
-
-    // Trap Square 26 (Water)
-    if (to === 26) {
-      newBoard[26] = null;
-      const resetPos = !newBoard[14] ? 14 : 0;
-      newBoard[resetPos] = turn;
-    }
+    newBoard[from] = occupant || null;
+    newBoard[to] = turn;
 
     await logMove(from, to, piece);
-    finalizeTurn(newBoard);
+    finalizeTurn(newBoard, borneOff);
   };
 
   const finalizeTurn = (newBoard, newBorne) => {
@@ -210,69 +148,69 @@ export default function SenetBoard({ player1 }) {
     setSelectedSquare(null);
     setLastThrow(0);
     setTurn(nextTurn);
-    if (gameMode === "PvP") updateRemoteGame(newBoard, nextTurn, 0, newBorne);
+    if (gameMode === "PvP") updateRemote(newBoard, nextTurn, 0, newBorne);
   };
 
-  // --- 5. RENDER HELPERS ---
-  const renderSquare = (idx) => {
-    const isSelected = selectedSquare === idx;
-    const num = idx + 1;
-    const paddedNum = num.toString().padStart(2, '0');
-    return (
-      <div key={idx} onClick={() => handleSquareClick(idx)}
-        style={{
-          width: "60px", height: "60px", border: isSelected ? "3px solid gold" : "1px solid rgba(255,255,255,0.1)",
-          backgroundImage: `url(/themes/sq${paddedNum}.${num === 28 ? 'jpeg' : 'png'})`,
-          backgroundSize: "cover", backgroundColor: colors.obsidian,
-          display: "flex", alignItems: "center", justifyContent: "center", position: "relative", cursor: "pointer"
-        }}>
-        {board[idx] === "white" && <img src="/themes/white_piece.png" style={{ width: "45px" }} />}
-        {board[idx] === "black" && <img src="/themes/black_piece.png" style={{ width: "45px" }} />}
-      </div>
-    );
+  const updateRemote = async (nb, nt, lt, nbo) => {
+    await supabase.from('senet_games').update({
+      board_state: nb, turn: nt, last_throw: lt, borne_off: nbo
+    }).eq('id', activeGameId);
   };
 
-  // --- 6. MAIN RENDER ---
-  if (!activeGameId && gameMode === "PvP") {
+  // --- 5. RENDER ---
+  if (view === "lobby") {
     return (
       <div style={{ padding: "100px", textAlign: "center", color: colors.gold }}>
-        <h2 style={{ letterSpacing: "4px" }}>SENET LOBBY</h2>
-        <div style={{ display: "flex", flexDirection: "column", gap: "20px", maxWidth: "300px", margin: "0 auto" }}>
-          <button onClick={hostPvpMatch} style={{ padding: "15px", background: colors.gold, border: "none", fontWeight: "bold", cursor: "pointer" }}>HOST PvP MATCH</button>
-          <div style={{ borderBottom: "1px solid #333", margin: "10px 0" }}></div>
-          <input placeholder="ROOM CODE" value={roomCodeInput} onChange={(e) => setRoomCodeInput(e.target.value.toUpperCase())} style={{ padding: "12px", textAlign: "center", borderRadius: "4px" }} />
-          <button onClick={joinPvpMatch} style={{ padding: "15px", background: "#333", color: "#fff", border: "none", cursor: "pointer" }}>JOIN PvP MATCH</button>
-          <button onClick={() => {setGameMode("AI"); initializeGame(); setActiveGameId("AI-MODE");}} style={{ background: "none", color: colors.darkSand, border: "none", cursor: "pointer" }}>Play Offline</button>
+        <h2>𓉐 SENET LOBBY</h2>
+        <button onClick={hostGame} style={{ padding: "15px", background: colors.gold, border: "none", cursor: "pointer", fontWeight: "bold" }}>HOST PVP MATCH</button>
+        <div style={{ margin: "20px" }}>
+          <button onClick={fetchOpenGames} style={{ color: "#aaa", background: "none", border: "none", cursor: "pointer" }}>Refresh Open Games</button>
+          {availableGames.map(g => (
+            <div key={g.id} style={{ border: "1px solid #444", padding: "10px", margin: "10px auto", maxWidth: "300px" }}>
+              <span>{g.player_white}'s Game</span>
+              <button onClick={() => {setActiveGameId(g.id); setGameMode("PvP"); setView("game");}} style={{ marginLeft: "10px", color: colors.gold }}>JOIN</button>
+            </div>
+          ))}
         </div>
+        <button onClick={() => setView("game")} style={{ background: "none", color: "#666", border: "none", cursor: "pointer" }}>Back to Board</button>
       </div>
     );
   }
 
   return (
-    <div style={{ color: "#fff", textAlign: "center", fontFamily: "serif", padding: "20px" }}>
-      <h1 style={{ color: colors.gold, letterSpacing: "8px" }}>TOMB OF SENET</h1>
-      <p style={{ color: colors.gold }}>{message}</p>
+    <div style={{ color: "#fff", textAlign: "center", padding: "20px" }}>
+      <h1 style={{ color: colors.gold, letterSpacing: "5px" }}>TOMB OF SENET</h1>
+      <button onClick={() => { setView("lobby"); fetchOpenGames(); }} style={{ background: "none", border: `1px solid ${colors.gold}`, color: colors.gold, padding: "5px 15px", borderRadius: "20px", cursor: "pointer", marginBottom: "20px" }}>
+        {gameMode === "PvP" ? `ROOM: ${activeGameId}` : "MULTIPLAYER LOBBY"}
+      </button>
 
-      <div style={{ margin: "20px auto", height: "100px" }}>
-        {lastThrow > 0 && <img src={`/themes/${lastThrow}.png`} style={{ height: "90px" }} />}
+      <p style={{ color: colors.gold }}>{message}</p>
+      
+      <div style={{ height: "100px", display: "flex", justifyContent: "center", margin: "10px" }}>
+        {lastThrow > 0 && <img src={`/themes/${lastThrow}.png`} style={{ height: "80px" }} />}
       </div>
 
-      <button onClick={throwSticks} disabled={isRolling || lastThrow > 0} style={{ padding: "12px 40px", background: colors.gold, fontWeight: "bold", borderRadius: "50px", cursor: "pointer", marginBottom: "20px" }}>
+      <button onClick={throwSticks} disabled={isRolling || lastThrow > 0} style={{ padding: "12px 40px", background: colors.gold, borderRadius: "50px", border: "none", fontWeight: "bold", cursor: "pointer" }}>
         {isRolling ? "CASTING..." : "THROW STICKS"}
       </button>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(10, 60px)", margin: "0 auto", width: "600px", border: `8px solid ${colors.darkSand}` }}>
-        {Array.from({ length: 10 }).map((_, i) => renderSquare(i))}
-        {[19, 18, 17, 16, 15, 14, 13, 12, 11, 10].map(i => renderSquare(i))}
-        {Array.from({ length: 10 }).map((_, i) => renderSquare(i + 20))}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(10, 60px)", margin: "30px auto", width: "600px", border: `5px solid ${colors.darkSand}`, backgroundColor: "#000" }}>
+        {board.map((cell, i) => (
+          <div key={i} onClick={() => handleSquareClick(i)} style={{
+            width: "60px", height: "60px", border: "1px solid #222", 
+            display: "flex", alignItems: "center", justifyContent: "center",
+            boxShadow: selectedSquare === i ? "inset 0 0 10px gold" : "none", cursor: "pointer"
+          }}>
+            {cell === "white" && <img src="/themes/white_piece.png" style={{ width: "40px" }} />}
+            {cell === "black" && <img src="/themes/black_piece.png" style={{ width: "40px" }} />}
+          </div>
+        ))}
       </div>
 
-      <div style={{ marginTop: "20px", display: "flex", justifyContent: "center", gap: "40px" }}>
-        <div style={{ color: colors.gold }}>WHITE: {borneOff.white}/5</div>
-        <div style={{ color: colors.gold }}>BLACK: {borneOff.black}/5</div>
+      <div style={{ display: "flex", justifyContent: "center", gap: "50px", color: colors.gold }}>
+        <div>WHITE: {borneOff.white}/5</div>
+        <div>BLACK: {borneOff.black}/5</div>
       </div>
-      
-      {activeGameId && <div style={{ marginTop: "10px", fontSize: "12px", color: colors.darkSand }}>ROOM: {activeGameId}</div>}
     </div>
   );
 }
